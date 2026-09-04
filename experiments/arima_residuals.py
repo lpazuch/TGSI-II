@@ -10,7 +10,7 @@ Gera:
   - residual_analysis.json : estatísticas + teste Ljung-Box
 
 Uso:
-  PYTHONPATH=src python scripts/analyze_residuals.py
+  PYTHONPATH=src python experiments/arima_residuals.py
 """
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
+import matplotlib
+matplotlib.use("Agg")  # headless: salva PNGs sem display
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -29,14 +31,8 @@ from statsmodels.stats.diagnostic import acorr_ljungbox
 from statsmodels.tsa.arima.model import ARIMA
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "run_cepea_hybrid_2006plus_long_remote"
-    / "raw"
-    / "target_soy_cepea_monthly.csv"
-)
-OUT_DIR = PROJECT_ROOT / "docs" / "academic_outputs" / "residual_analysis"
+DATA_FILE = PROJECT_ROOT / "data" / "raw" / "target_soy_cepea_monthly.csv"
+OUT_DIR = PROJECT_ROOT / "results" / "arima_residuals"
 
 HOLDOUT_MONTHS = 24
 ARIMA_ORDER = (1, 1, 0)

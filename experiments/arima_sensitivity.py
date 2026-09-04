@@ -5,12 +5,12 @@ Análise de sensibilidade: MAE do ARIMA(1,1,0) por janela de treino.
 Testa diferentes janelas (36 a 216 meses) com holdout fixo de 24 meses.
 Mostra como a estabilidade do modelo varia com o tamanho da base histórica.
 
-Saídas em docs/academic_outputs/sensitivity_analysis/:
+Saídas em results/sensitivity_analysis/:
   - sensitivity_window_results.csv / .json
   - sensitivity_window_mae.png
 
 Uso:
-  PYTHONPATH=src python scripts/sensitivity_analysis.py
+  PYTHONPATH=src python experiments/arima_sensitivity.py
 """
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
+import matplotlib
+matplotlib.use("Agg")  # headless: salva PNGs sem display
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -28,14 +30,8 @@ from sklearn.metrics import mean_absolute_error
 from statsmodels.tsa.arima.model import ARIMA
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "run_cepea_hybrid_2006plus_long_remote"
-    / "raw"
-    / "target_soy_cepea_monthly.csv"
-)
-OUT_DIR = PROJECT_ROOT / "docs" / "academic_outputs" / "sensitivity_analysis"
+DATA_FILE = PROJECT_ROOT / "data" / "raw" / "target_soy_cepea_monthly.csv"
+OUT_DIR = PROJECT_ROOT / "results" / "arima_sensitivity"
 
 HOLDOUT_MONTHS = 24
 ARIMA_ORDER = (1, 1, 0)

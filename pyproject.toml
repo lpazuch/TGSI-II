@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tgsi-ii"
+version = "0.1.0"
+description = "TGSI II — pipeline de construcao da base e experimentos de previsao do preco mensal da soja (CEPEA/ESALQ)."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "lpazuch" },
+]
+dependencies = [
+  "numpy==2.4.4",
+  "pandas==3.0.2",
+  "scipy==1.17.1",
+  "scikit-learn==1.8.0",
+  "statsmodels==0.14.6",
+  "matplotlib==3.10.9",
+  "xgboost==3.2.0",
+  "xlrd==2.0.2",
+]
+
+[project.scripts]
+tgsi-pipeline = "tgsi_pipeline.cli:main"
+tgsi-model-baselines = "tgsi_pipeline.modeling:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -11,14 +11,14 @@ Random Forest e XGBoost, comparando as métricas por período:
 Base de dados: run_cepea_hybrid_2015plus_manual_remote_merge (2015-04 → 2026-03).
 Todos os modelos são avaliados nos mesmos períodos para comparação justa.
 
-Saídas em docs/academic_outputs/shock_period/:
+Saídas em results/shock_period/:
   - shock_period_walkforward.csv   : previsões step-by-step de todos os modelos
   - shock_period_metrics.json/.csv : métricas por período × modelo
   - shock_period_errors.png        : erro absoluto ao longo do tempo por modelo
   - shock_period_forecast.png      : real vs. previsto por modelo
 
 Uso:
-  PYTHONPATH=src .venv/bin/python scripts/shock_period_analysis.py
+  PYTHONPATH=src .venv/bin/python experiments/shock_period_analysis.py
 """
 from __future__ import annotations
 
@@ -29,6 +29,8 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
+import matplotlib
+matplotlib.use("Agg")  # headless: salva PNGs sem display
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -45,14 +47,8 @@ except Exception:
     HAS_XGBOOST = False
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "run_cepea_hybrid_2006plus_long_remote"
-    / "processed"
-    / "features_monthly_modeling.csv"
-)
-OUT_DIR = PROJECT_ROOT / "docs" / "academic_outputs" / "shock_period"
+DATA_FILE = PROJECT_ROOT / "data" / "processed" / "features_monthly_modeling.csv"
+OUT_DIR = PROJECT_ROOT / "results" / "shock_period"
 
 TARGET_VARIABLE = "soy_price_brl_bag_next_month"
 MIN_TRAIN = 24

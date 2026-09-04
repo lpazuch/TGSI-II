@@ -5,7 +5,7 @@ Análise de correlação cruzada (CCF) entre features e preço da soja.
 Justifica as defasagens escolhidas para cada variável exógena, documentando
 a cadeia causal: vegetação → produtividade → oferta → mercado → preço.
 
-Saídas em docs/academic_outputs/cross_correlation/:
+Saídas em results/cross_correlation/:
   - ccf_cambio_e_petroleo.png
   - ccf_clima.png
   - ccf_sensoriamento_remoto.png
@@ -13,7 +13,7 @@ Saídas em docs/academic_outputs/cross_correlation/:
   - ccf_results.json
 
 Uso:
-  PYTHONPATH=src python scripts/cross_correlation_analysis.py
+  PYTHONPATH=src python experiments/cross_correlation.py
 """
 from __future__ import annotations
 
@@ -24,19 +24,15 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
+import matplotlib
+matplotlib.use("Agg")  # headless: salva PNGs sem display
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_FILE = (
-    PROJECT_ROOT
-    / "data"
-    / "run_cepea_hybrid_2006plus_long_remote"
-    / "processed"
-    / "features_monthly_modeling.csv"
-)
-OUT_DIR = PROJECT_ROOT / "docs" / "academic_outputs" / "cross_correlation"
+DATA_FILE = PROJECT_ROOT / "data" / "processed" / "features_monthly_modeling.csv"
+OUT_DIR = PROJECT_ROOT / "results" / "cross_correlation"
 
 TARGET_VARIABLE = "soy_price_brl_bag_next_month"
 MAX_LAG = 12
@@ -127,7 +123,9 @@ def plot_ccf_group(
         .replace("/", "_")
         .replace("ç", "c")
         .replace("â", "a")
+        .replace("ã", "a")
         .replace("ê", "e")
+        .replace("ó", "o")
         .replace("ô", "o")
     )
     fig.suptitle(f"Correlação Cruzada — {group_name}", fontsize=13, fontweight="bold")

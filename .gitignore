@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Ambientes virtuais
+.venv/
+.venv-*/
+venv/
+env/
+
+# SO / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Documentacao
+docs/methodology.md
+
+# ----------------------------------------------------------------------
+# Dados: NADA de dado versionado (decisao do projeto).
+# A base e reproduzida a partir dos arquivos de entrada + do codigo.
+# Ver docs/data_sources.md e scripts/build_dataset.py.
+# ----------------------------------------------------------------------
+data/**
+!data/**/
+!data/**/.gitkeep
+!data/raw/run_config.reference.json
+
+# Planilha bruta da CEPEA (recebida junto com o codigo)
+*.xls
+*.xlsx
+
+# Resultados de experimentos: apenas a estrutura de pastas fica no Git
+results/**
+!results/**/
+!results/**/.gitkeep
+
+*.log

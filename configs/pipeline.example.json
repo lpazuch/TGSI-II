@@ -1,0 +1,63 @@
+{
+  "date_range": {
+    "start": "2020-01-01",
+    "end": "2024-12-31"
+  },
+  "target_frequencies": [
+    "daily",
+    "monthly"
+  ],
+  "output_base_dir": "data",
+  "locations": [
+    {
+      "id": "sorriso_mt",
+      "name": "Sorriso, MT",
+      "latitude": -12.5425,
+      "longitude": -55.7211,
+      "inmet_station_codes": [
+        "A904"
+      ]
+    }
+  ],
+  "target": {
+    "enabled": false,
+    "source": "cepea_xls",
+    "path": "CEPEA_20260407190923.xls",
+    "price_column_brl": "À vista R$",
+    "price_column_usd": "À vista US$",
+    "series_name": "CEPEA/ESALQ - Paranaguá"
+  },
+  "sources": {
+    "climate": {
+      "enabled": true,
+      "nasa_power_fallback": true,
+      "nasa_power_parameters": [
+        "PRECTOTCORR",
+        "T2M",
+        "T2M_MAX",
+        "T2M_MIN",
+        "RH2M",
+        "WS2M"
+      ]
+    },
+    "remote_sensing": {
+      "enabled": false,
+      "earthdata_username_env": "EARTHDATA_USERNAME",
+      "earthdata_password_env": "EARTHDATA_PASSWORD",
+      "ndvi_product_id": "MOD13Q1.061",
+      "ndvi_layer": null,
+      "soil_moisture_product_id": "SPL3SMP_E.006",
+      "soil_moisture_layer": null,
+      "poll_interval_seconds": 15,
+      "task_timeout_seconds": 1800
+    },
+    "economics": {
+      "enabled": true,
+      "fx_currency": "USD",
+      "oil": {
+        "provider": "eia",
+        "frequency": "daily"
+      }
+    }
+  }
+}
