@@ -30,10 +30,10 @@ docs/methodology.md
 # A base e reproduzida a partir dos arquivos de entrada + do codigo.
 # Ver docs/data_sources.md e scripts/build_dataset.py.
 # ----------------------------------------------------------------------
-data/**
-!data/**/
-!data/**/.gitkeep
-!data/raw/run_config.reference.json
+#data/**
+#!data/**/
+#!data/**/.gitkeep
+#!data/raw/run_config.reference.json
 
 # Planilha bruta da CEPEA (recebida junto com o codigo)
 *.xls
