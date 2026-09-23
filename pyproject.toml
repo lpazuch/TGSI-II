@@ -22,6 +22,11 @@ dependencies = [
   "xlrd==2.0.2",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+]
+
 [project.scripts]
 tgsi-pipeline = "tgsi_pipeline.cli:main"
 tgsi-model-baselines = "tgsi_pipeline.modeling:main"

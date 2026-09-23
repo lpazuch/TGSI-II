@@ -22,22 +22,23 @@ env/
 .idea/
 .vscode/
 
-# Documentacao
-docs/methodology.md
-
 # ----------------------------------------------------------------------
-# Dados: NADA de dado versionado (decisao do projeto).
-# A base e reproduzida a partir dos arquivos de entrada + do codigo.
-# Ver docs/data_sources.md e scripts/build_dataset.py.
+# Dados — politica revisada apos auditoria de 13/09/2026 (item 7-9):
+#   data/raw/        -> VERSIONADO. E' o unico jeito de um `git clone` novo
+#                        conseguir rodar `scripts/build_dataset.py` (--offline)
+#                        sem rede nem credenciais. Ver docs/data_sources.md.
+#   data/interim/    -> gerado pelo pipeline, ignorado.
+#   data/processed/  -> gerado pelo pipeline, ignorado (exceto o .reference.csv
+#                        usado so' para conferencia local, tambem ignorado).
 # ----------------------------------------------------------------------
-#data/**
-#!data/**/
-#!data/**/.gitkeep
-#!data/raw/run_config.reference.json
+data/interim/*
+!data/interim/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
 
-# Planilha bruta da CEPEA (recebida junto com o codigo)
-*.xls
-*.xlsx
+# Manifests gerados a cada rodada do pipeline (nao sao dado de entrada)
+data/run_config.json
+data/run_report.json
 
 # Resultados de experimentos: apenas a estrutura de pastas fica no Git
 results/**

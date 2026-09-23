@@ -8,8 +8,13 @@ Random Forest e XGBoost, comparando as métricas por período:
   - choque     : 2020-01 a 2022-12 (COVID + crise de oferta + guerra na Ucrânia)
   - pós-choque : 2023-01 em diante
 
-Base de dados: run_cepea_hybrid_2015plus_manual_remote_merge (2015-04 → 2026-03).
-Todos os modelos são avaliados nos mesmos períodos para comparação justa.
+A classificação de período usa `target_month` (o mês AO QUAL o preço previsto
+pertence), não `date` (o mês de entrada/features). Corrigido na auditoria de
+13/09/2026, item 13 — classificar por `date` deslocava as fronteiras em um mês.
+
+Todos os modelos são avaliados nos mesmos períodos, com o mesmo conjunto de
+features (`tgsi_pipeline.modeling.METADATA_FIELDS`, item 15 da auditoria) e
+no mesmo horizonte de 1 passo, para comparação justa.
 
 Saídas em results/shock_period/:
   - shock_period_walkforward.csv   : previsões step-by-step de todos os modelos
@@ -29,6 +34,9 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
 import matplotlib
 matplotlib.use("Agg")  # headless: salva PNGs sem display
 import matplotlib.pyplot as plt
@@ -46,7 +54,10 @@ try:
 except Exception:
     HAS_XGBOOST = False
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Mesma fonte de METADATA_FIELDS usada por holdout_12m.py — garante que os
+# dois experimentos comparem o mesmo conjunto de features (auditoria item 15).
+from tgsi_pipeline.modeling import METADATA_FIELDS as META_COLS
+
 DATA_FILE = PROJECT_ROOT / "data" / "processed" / "features_monthly_modeling.csv"
 OUT_DIR = PROJECT_ROOT / "results" / "shock_period"
 
@@ -55,12 +66,6 @@ MIN_TRAIN = 24
 
 SHOCK_START = pd.Timestamp("2020-01-01")
 SHOCK_END = pd.Timestamp("2022-12-01")
-
-META_COLS = {
-    "date", "target_month", "target_variable", "target_value",
-    "target_source", "target_series_name",
-    "soy_price_brl_bag", "soy_price_usd_bag",
-}
 
 PERIOD_COLORS = {
     "pre_shock":  "#16a34a",
@@ -142,7 +147,9 @@ def walkforward_ml(
             pred = float(pipeline.predict(X_test)[0])
         except Exception:
             pred = float("nan")
-        preds[df["date"].iloc[i]] = pred
+        # Rotulado por target_month: e' o mes ao qual o valor previsto
+        # pertence (nao o mes de entrada `date`). Ver item 13 da auditoria.
+        preds[df["target_month"].iloc[i]] = pred
 
     return preds
 
@@ -176,8 +183,8 @@ def compute_metrics(
                 "label_period": PERIOD_LABELS.get(period, "Total"),
                 "label_model": MODEL_LABELS.get(model_name, model_name),
                 "n_obs": int(valid.sum()),
-                "date_start": str(min(d for d, p in zip(common_dates, periods) if period == "all" or p == period)),
-                "date_end": str(max(d for d, p in zip(common_dates, periods) if period == "all" or p == period)),
+                "target_month_start": str(min(d for d, p in zip(common_dates, periods) if period == "all" or p == period)),
+                "target_month_end": str(max(d for d, p in zip(common_dates, periods) if period == "all" or p == period)),
                 "mae": round(float(mean_absolute_error(yt, yp)), 6),
                 "rmse": round(float(np.sqrt(np.mean((yt - yp) ** 2))), 6),
                 "mape": round(float(np.mean(np.abs((yt - yp) / yt)) * 100), 6),
@@ -186,13 +193,13 @@ def compute_metrics(
 
 
 def build_walkforward_df(
-    dates: list[pd.Timestamp],
+    target_months: list[pd.Timestamp],
     actuals: dict[pd.Timestamp, float],
     preds: dict[str, dict[pd.Timestamp, float]],
 ) -> pd.DataFrame:
     rows = []
-    for d in sorted(dates):
-        row = {"date": d, "actual": actuals.get(d, float("nan")), "period": classify_period(d)}
+    for d in sorted(target_months):
+        row = {"target_month": d, "actual": actuals.get(d, float("nan")), "period": classify_period(d)}
         for model_name, pred_dict in preds.items():
             row[model_name] = pred_dict.get(d, float("nan"))
         rows.append(row)
@@ -205,8 +212,8 @@ def plot_errors(wf: pd.DataFrame, model_names: list[str], out_dir: Path) -> None
     shock_mask = wf["period"] == "shock"
     if shock_mask.any():
         ax.axvspan(
-            wf.loc[shock_mask, "date"].min(),
-            wf.loc[shock_mask, "date"].max(),
+            wf.loc[shock_mask, "target_month"].min(),
+            wf.loc[shock_mask, "target_month"].max(),
             alpha=0.08, color="#dc2626",
         )
 
@@ -215,13 +222,13 @@ def plot_errors(wf: pd.DataFrame, model_names: list[str], out_dir: Path) -> None
             continue
         abs_err = (wf["actual"] - wf[model]).abs()
         style = MODEL_STYLES.get(model, {})
-        ax.plot(wf["date"], abs_err, label=MODEL_LABELS.get(model, model),
+        ax.plot(wf["target_month"], abs_err, label=MODEL_LABELS.get(model, model),
                 alpha=0.85, **style)
 
     ax.axvline(SHOCK_START, color="#dc2626", linestyle="--", linewidth=0.8)
     ax.axvline(SHOCK_END + pd.offsets.MonthEnd(1), color="#dc2626", linestyle="--", linewidth=0.8)
-    ax.set_title("Erro absoluto por mês — Walk-forward 1-passo — todos os modelos")
-    ax.set_xlabel("Data")
+    ax.set_title("Erro absoluto por mês previsto — Walk-forward 1-passo — todos os modelos")
+    ax.set_xlabel("Mês previsto (target_month)")
     ax.set_ylabel("Erro absoluto (R$/saca)")
     ax.legend(fontsize=9, ncol=2)
     ax.grid(axis="y", linestyle="--", alpha=0.35)
@@ -237,21 +244,21 @@ def plot_forecast(wf: pd.DataFrame, model_names: list[str], out_dir: Path) -> No
     shock_mask = wf["period"] == "shock"
     if shock_mask.any():
         ax.axvspan(
-            wf.loc[shock_mask, "date"].min(),
-            wf.loc[shock_mask, "date"].max(),
+            wf.loc[shock_mask, "target_month"].min(),
+            wf.loc[shock_mask, "target_month"].max(),
             alpha=0.08, color="#dc2626", label="Período de choque",
         )
 
-    ax.plot(wf["date"], wf["actual"], color="black", linewidth=2, label="Realizado", zorder=5)
+    ax.plot(wf["target_month"], wf["actual"], color="black", linewidth=2, label="Realizado", zorder=5)
     for model in model_names:
         if model not in wf.columns:
             continue
         style = MODEL_STYLES.get(model, {})
-        ax.plot(wf["date"], wf[model], label=MODEL_LABELS.get(model, model),
+        ax.plot(wf["target_month"], wf[model], label=MODEL_LABELS.get(model, model),
                 alpha=0.8, **style)
 
     ax.set_title("Real vs. Previsto — Walk-forward 1-passo — Soja CEPEA/ESALQ")
-    ax.set_xlabel("Data")
+    ax.set_xlabel("Mês previsto (target_month)")
     ax.set_ylabel("Preço (R$/saca)")
     ax.legend(fontsize=9, ncol=3)
     ax.grid(axis="y", linestyle="--", alpha=0.35)
@@ -324,24 +331,30 @@ def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     print(f"Carregando: {DATA_FILE.relative_to(PROJECT_ROOT)}")
-    df = pd.read_csv(DATA_FILE, parse_dates=["date"])
+    df = pd.read_csv(DATA_FILE, parse_dates=["date", "target_month"])
     df = (
         df[df["target_variable"] == TARGET_VARIABLE]
         .sort_values("date")
         .reset_index(drop=True)
     )
-    print(f"Observações: {len(df)} | {df['date'].iloc[0].date()} → {df['date'].iloc[-1].date()}")
-    print(f"Período de choque: {SHOCK_START.date()} → {SHOCK_END.date()}")
-    print(f"Treino mínimo: {MIN_TRAIN} meses → previsões a partir de {df['date'].iloc[MIN_TRAIN].date()}")
+    print(f"Observações: {len(df)} | entrada {df['date'].iloc[0].date()} → {df['date'].iloc[-1].date()}")
+    print(f"Período de choque (por target_month): {SHOCK_START.date()} → {SHOCK_END.date()}")
+    print(
+        f"Treino mínimo: {MIN_TRAIN} meses → previsões a partir do mês previsto "
+        f"{df['target_month'].iloc[MIN_TRAIN].date()}"
+    )
 
     feature_cols = get_feature_cols(df)
     print(f"Features para ML: {len(feature_cols)} colunas")
 
+    # Indexado por target_month: e' o mes AO QUAL o valor previsto pertence,
+    # e portanto o mes correto para classificar pre/choque/pos-choque
+    # (auditoria item 13).
     target_series = pd.Series(
         df["target_value"].values.astype(float),
-        index=df["date"],
+        index=df["target_month"],
     )
-    actuals = dict(zip(df["date"], df["target_value"].astype(float)))
+    actuals = dict(zip(df["target_month"], df["target_value"].astype(float)))
 
     all_preds: dict[str, dict[pd.Timestamp, float]] = {}
 

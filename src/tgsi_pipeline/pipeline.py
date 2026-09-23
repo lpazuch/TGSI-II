@@ -580,10 +580,6 @@ def _attach_monthly_target(
         return []
 
     target_by_date = {str(row["date"]): row for row in target_rows}
-    ordered_target_dates = sorted(target_by_date)
-    next_month_by_date: dict[str, dict[str, Any]] = {}
-    for index, current_date in enumerate(ordered_target_dates[:-1]):
-        next_month_by_date[current_date] = target_by_date[ordered_target_dates[index + 1]]
 
     output: list[dict[str, Any]] = []
     for row in feature_rows:
@@ -594,7 +590,13 @@ def _attach_monthly_target(
             current["soy_price_usd_bag"] = target.get("soy_price_usd_bag")
             current["target_source"] = target.get("target_source")
             current["target_series_name"] = target.get("target_series_name")
-        next_target = next_month_by_date.get(str(row["date"]))
+
+        # O mes seguinte e' definido por aritmetica de data (date + 1 mes),
+        # NUNCA pela "proxima linha disponivel" da serie. Se houver uma lacuna
+        # na serie CEPEA (mes ausente), o alvo fica None em vez de ser pareado
+        # incorretamente com um mes mais distante. Ver tests/test_target_pairing.py.
+        next_month_key = _next_month_start(str(row["date"]))
+        next_target = target_by_date.get(next_month_key)
         current["soy_price_brl_bag_next_month"] = next_target.get("soy_price_brl_bag") if next_target else None
         current["soy_price_usd_bag_next_month"] = next_target.get("soy_price_usd_bag") if next_target else None
         output.append(current)

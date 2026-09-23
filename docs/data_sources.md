@@ -10,6 +10,23 @@ estação INMET de referência **A904**. Janela de coleta configurada:
 Legenda: *(a verificar)* = não determinável só pelo código/arquivos atuais;
 precisa ser confirmado antes da escrita final do TCC.
 
+> **Proveniência exata (auditoria 13/09/2026, Passo 1).** `data/raw/` é
+> versionado no Git — é o material que qualquer clone recebe. A planilha bruta
+> da CEPEA está em `data/raw/CEPEA_20260407190923.xls`:
+> - **URL/fonte:** consulta pública do Indicador CEPEA/ESALQ — Soja,
+>   Paranaguá (`https://www.cepea.esalq.usp.br/br/indicador/soja.aspx`);
+> - **Data do download:** 07/04/2026 (embutida no nome do arquivo);
+> - **Procedimento:** exportação manual da série completa pela interface do
+>   site (não há endpoint de API público documentado pela CEPEA);
+> - **Nome esperado:** `CEPEA_20260407190923.xls`;
+> - **SHA-256:** `4e0cb593df0f3d29ac23413dd7187f9bba0003b47610e9998df72b1c42f18c40`.
+>
+> Os demais arquivos de `data/raw/` (câmbio, Brent, clima, NDVI, umidade do
+> solo, alvo diário/mensal) foram gerados pelo próprio pipeline
+> (`tgsi_pipeline.pipeline.run_pipeline`, modo `--online`) na janela
+> 2006-04-01 → 2026-04-07, a partir das fontes descritas abaixo — não são
+> download manual, são reprodutíveis via `scripts/build_dataset.py --online`.
+
 ---
 
 ## 1. Alvo — preço da soja CEPEA/ESALQ
@@ -50,7 +67,7 @@ precisa ser confirmado antes da escrita final do TCC.
 | Período | 2006-04-01 → 2026-04-07 |
 | Transformação | Scraping de tabela HTML → série diária (`economics_brent_daily.csv`) |
 | Agregação | **Média mensal** |
-| *(a verificar)* | Se, nesta run, algum trecho veio do fallback World Bank (checar `oil_source` no CSV) |
+| Fonte usada nesta run | **100% EIA** (5060/5060 linhas com `oil_source=EIA`; fallback World Bank não foi acionado) — verificado em `data/raw/economics_brent_daily.csv` |
 
 ## 4. Clima (precipitação, temperatura, umidade, vento)
 
@@ -62,7 +79,8 @@ precisa ser confirmado antes da escrita final do TCC.
 | Frequência original | INMET: horária → agregada a diária (precip. = soma; temp. média/umidade/vento = média; máx/mín = máx/mín). NASA POWER: diária |
 | Período | 2006-04-01 → 2026-04-07 |
 | Agregação mensal | Precipitação = **soma**; temperatura média, umidade, vento = **média**; temp. máx = **máx**; temp. mín = **mín** (`_build_monthly_features`) |
-| *(a verificar)* | Qual fonte de fato preencheu esta run (inspecionar `climate_source` em `data/raw/climate_combined_sorriso_mt.csv`); cobertura real da estação A904 antes de ~2008 |
+| Fonte usada nesta run | **100% NASA_POWER** (7312/7312 dias com `climate_source=NASA_POWER`, verificado em `data/raw/climate_combined_sorriso_mt.csv`). Não existe `climate_inmet_*.csv` em `data/raw/` — a estação INMET **A904** não retornou nenhuma linha usável na janela 2006-04→2026-04 (fetch falhou ou a estação não tem dados históricos publicados nesse período; o pipeline só grava esse arquivo `if inmet_rows:`) |
+| *(a verificar)* | Causa exata da ausência de dados INMET/A904 (estação sem histórico publicado vs. falha pontual de rede/parsing no dia da coleta) |
 
 ## 5. NDVI (vigor da vegetação)
 
@@ -74,7 +92,7 @@ precisa ser confirmado antes da escrita final do TCC.
 | Frequência original | Composição de 16 dias |
 | Período | MODIS desde 2000; nesta run, alinhado à janela até 2026-04 |
 | Agregação | Valor do ponto → **média mensal** |
-| *(a verificar)* | Nome exato da layer retornada pelo AppEEARS (registrar de `data/raw/remote_ndvi_sorriso_mt.csv`, coluna `ndvi_source`) |
+| Layer usada nesta run | **`_250m_16_days_NDVI`** do produto `MOD13Q1.061` (461/461 linhas com `ndvi_source=AppEEARS:MOD13Q1.061:_250m_16_days_NDVI`, verificado em `data/raw/remote_ndvi_sorriso_mt.csv`) |
 
 ## 6. Umidade do solo
 
@@ -86,7 +104,7 @@ precisa ser confirmado antes da escrita final do TCC.
 | Frequência original | Diária (composições AM/PM) |
 | Período | **A partir de 2015** (missão SMAP lançada em jan/2015). No dataset final há valores só a partir de ~fev/2015 → as ~107 primeiras linhas ficam sem umidade do solo. **Limitação conhecida, não é erro** |
 | Agregação | **Média mensal** |
-| *(a verificar)* | Layer(s) exata(s) retornada(s) pelo AppEEARS |
+| Layer usada nesta run | **`Soil_Moisture_Retrieval_Data_PM_soil_moisture_pm`** do produto `SPL3SMP_E.006` (1413/1413 linhas com `soil_moisture_source=AppEEARS:SPL3SMP_E.006:Soil_Moisture_Retrieval_Data_PM_soil_moisture_pm`, verificado em `data/raw/remote_soil_moisture_sorriso_mt.csv`) — só a passagem **PM**; a passagem AM não foi retornada/selecionada nesta coleta |
 
 ## 7. Variáveis derivadas do calendário / da própria série
 
@@ -105,3 +123,42 @@ fonte externa:
 Aplicadas a: `precipitation_mm`, `temperature_mean_c`, `relative_humidity_pct`,
 `wind_speed_ms`, `ndvi`, `soil_moisture_m3m3`, `usd_brl`, `brent_usd_bbl`
 (anomalia: as 6 primeiras exceto `relative_humidity_pct` e `wind_speed_ms`).
+
+## 8. Reproduzindo a coleta de sensoriamento remoto (NDVI e umidade do solo)
+
+Só é necessário para o modo `--online` (o modo `--offline`, padrão, usa os
+CSVs já versionados em `data/raw/` e não toca nisso). Procedimento:
+
+1. **Criar conta NASA Earthdata:** `https://urs.earthdata.nasa.gov/users/new`
+   (gratuita).
+2. **Autorizar o app AppEEARS** na conta (feito automaticamente no primeiro
+   login em `https://appeears.earthdatacloud.nasa.gov/`, ou manualmente em
+   Earthdata → Applications → Authorized Apps → adicionar "AppEEARS").
+3. **Configurar as credenciais como variáveis de ambiente** (nunca commitar):
+   ```bash
+   export EARTHDATA_USERNAME="seu_usuario"
+   export EARTHDATA_PASSWORD="sua_senha"
+   ```
+4. **Produtos e layers consultados** pelo pipeline
+   (`src/tgsi_pipeline/sources/remote_sensing.py`, via API REST do AppEEARS,
+   `task_type: "point"`):
+   - NDVI: produto `MOD13Q1.061`, layer `_250m_16_days_NDVI` (a que esta run
+     efetivamente retornou — seleção é automática por prioridade, ver
+     `_pick_ndvi_layers`);
+   - Umidade do solo: produto `SPL3SMP_E.006`, layer
+     `Soil_Moisture_Retrieval_Data_PM_soil_moisture_pm` (idem, ver
+     `_pick_soil_moisture_layers`).
+5. **Filtro espacial:** ponto único, lat `-12.5425` / lon `-55.7211`
+   (Sorriso–MT), definido em `configs/dataset.hybrid_2006plus.json` →
+   `locations[0]`.
+6. **Filtro temporal:** `date_range` do mesmo config (`2006-04-01` a
+   `2026-04-07`).
+7. **Escalas aplicadas:** `scale_factor`/`add_offset` vêm dos metadados do
+   próprio produto AppEEARS; o pipeline só os aplica quando detecta que o
+   valor bruto ainda não veio escalado (`_needs_scaling` em
+   `remote_sensing.py` — evita escalar duas vezes um valor que o AppEEARS já
+   devolveu em unidade física).
+8. **Tempo de espera:** o AppEEARS processa a extração de forma assíncrona
+   (fila de tasks); o config usa `task_timeout_seconds: 21600` (6h) e
+   `poll_interval_seconds: 30`. Na prática o tempo varia de minutos a horas
+   conforme a fila do serviço.

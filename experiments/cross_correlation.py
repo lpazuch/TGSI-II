@@ -81,7 +81,6 @@ def plot_ccf_group(
     if n == 1:
         axes = [axes]
 
-    conf = 1.96 / np.sqrt(len(df))
     results: dict = {}
 
     for ax, feat in zip(axes, available):
@@ -89,6 +88,14 @@ def plot_ccf_group(
         if len(valid) < 12:
             ax.set_visible(False)
             continue
+
+        # Banda de confianca (aproximacao 1.96/sqrt(N)) calculada com o N de
+        # PARES VALIDOS desta variavel, nao com o tamanho da base completa —
+        # variaveis com historico mais curto (ex.: umidade do solo, so' desde
+        # ~2015) tem N efetivo menor. Corrigido na auditoria de 13/09/2026,
+        # item 17. Aviso: em series autocorrelacionadas esta banda simples e'
+        # so' uma referencia visual, nao evidencia estatistica conclusiva.
+        conf = 1.96 / np.sqrt(len(valid))
 
         lags, cors = cross_corr(valid[feat].values, valid["target_value"].values, MAX_LAG)
         colors = ["#2563eb" if abs(c) > conf else "#93c5fd" for c in cors]
@@ -178,6 +185,13 @@ def main() -> None:
     for _, row in summary_df.iterrows():
         sig = "SIM" if row["significant"] else "NÃO"
         print(f"{row['feature']:<25} {row['best_lag']:>6} {row['best_corr']:>8.4f} {sig:>9}")
+    print(
+        "\n  Aviso: banda de confianca calculada com N de pares validos por "
+        "variavel (1.96/sqrt(N)). Em series temporais autocorrelacionadas "
+        "(caso desta serie mensal), essa banda e' apenas uma referencia "
+        "visual — NAO deve ser lida como teste de significancia estatistica "
+        "conclusivo. Ver docs/methodology.md."
+    )
 
     out_csv = OUT_DIR / "ccf_summary.csv"
     summary_df.to_csv(out_csv, index=False)

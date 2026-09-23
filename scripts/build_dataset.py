@@ -33,6 +33,8 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sys
 from pathlib import Path
 
@@ -174,6 +176,57 @@ def build_online(config_path: Path) -> Path:
     return out_path
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 16), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def register_dataset(out_path: Path) -> dict:
+    """Registra numero de linhas, periodo, colunas, % de ausentes e o hash
+    SHA-256 do CSV final — para conferencia/auditoria independente (Passo 1 e
+    Passo 6 da auditoria de 13/09/2026)."""
+    rows = read_csv(out_path)
+    if not rows:
+        raise SystemExit(f"{out_path} foi gerado vazio.")
+
+    fieldnames = list(rows[0].keys())
+    dates = sorted(r["date"] for r in rows)
+    target_months = sorted(r["target_month"] for r in rows)
+
+    missing_pct = {}
+    for field in fieldnames:
+        missing = sum(1 for r in rows if r.get(field) in (None, ""))
+        missing_pct[field] = round(100.0 * missing / len(rows), 2)
+
+    manifest = {
+        "file": str(out_path.relative_to(PROJECT_ROOT)),
+        "sha256": _sha256(out_path),
+        "n_rows": len(rows),
+        "n_columns": len(fieldnames),
+        "date_range": {"start": dates[0], "end": dates[-1]},
+        "target_month_range": {"start": target_months[0], "end": target_months[-1]},
+        "target_variable": rows[0].get("target_variable"),
+        "missing_pct_by_column": missing_pct,
+    }
+
+    manifest_path = out_path.parent / "dataset_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    print("\nOK.")
+    print(f"  {manifest['file']}")
+    print(f"  linhas: {manifest['n_rows']} | colunas: {manifest['n_columns']}")
+    print(f"  entrada (date): {dates[0]} -> {dates[-1]}")
+    print(f"  alvo (target_month): {target_months[0]} -> {target_months[-1]} ({manifest['target_variable']})")
+    worst_missing = sorted(missing_pct.items(), key=lambda item: item[1], reverse=True)[:5]
+    print(f"  colunas com mais ausentes: {worst_missing}")
+    print(f"  sha256: {manifest['sha256']}")
+    print(f"  manifesto salvo em: {manifest_path.relative_to(PROJECT_ROOT)}")
+    return manifest
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Reconstroi data/processed/features_monthly_modeling.csv")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -190,13 +243,7 @@ def main() -> None:
     print("=" * 62)
 
     out_path = build_offline(args.config) if args.offline else build_online(args.config)
-
-    rows = read_csv(out_path)
-    dates = sorted(r["date"] for r in rows)
-    print("\nOK.")
-    print(f"  {out_path.relative_to(PROJECT_ROOT)}")
-    print(f"  {len(rows)} observacoes | {dates[0]} -> {dates[-1]}")
-    print(f"  alvo: {rows[0].get('target_variable')} (t -> t+1)")
+    register_dataset(out_path)
 
 
 if __name__ == "__main__":

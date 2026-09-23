@@ -10,6 +10,15 @@ CEPEA/ESALQ - Paranagua, R$/saca, um mes a frente).
 Os ultimos 12 meses da serie sao reservados como teste final; o restante
 e usado para treino. Nenhuma observacao futura entra no treino.
 
+Protocolo (corrigido na auditoria de 13/09/2026, item 12): os TRES modelos
+sao avaliados no MESMO horizonte de 1 passo. Random Forest e XGBoost ja
+faziam isso naturalmente (recebem as features observadas em t e preveem
+t+1, uma vez por mes de teste). O ARIMA agora faz o mesmo: em vez de um
+unico ajuste antes do holdout seguido de forecast(steps=12) sem atualizacao,
+ele e' reajustado a cada mes com todo o historico disponivel ate ali
+(walk-forward de janela expansiva) e preve so' o proximo mes. Isso torna a
+comparacao MAE/RMSE/MAPE/R2 entre os tres modelos consistente.
+
 Historico: a versao do TGSI I tambem rodava uma linha de modelagem em USD
 (``soy_price_usd_bag_next_month``) e uma conversao USD->BRL usando o cambio
 realizado do holdout. Isso foi REMOVIDO — ver docs/methodology.md secao
@@ -38,6 +47,9 @@ from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
 import matplotlib
 matplotlib.use("Agg")  # sem display; salva PNGs
 import matplotlib.pyplot as plt
@@ -55,21 +67,18 @@ try:
 except Exception:  # noqa: BLE001
     HAS_XGBOOST = False
 
+# Fonte unica do conjunto de colunas de metadado (nao-feature), compartilhada
+# com shock_period_analysis.py e com tgsi_pipeline.modeling. Corrigido na
+# auditoria de 13/09/2026, item 15: os dois experimentos usavam conjuntos de
+# features diferentes (shock_period excluia soy_price_brl_bag/usd_bag; este
+# script nao excluia) — agora ambos importam a mesma constante.
+from tgsi_pipeline.modeling import METADATA_FIELDS as META_COLUMNS
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INPUT = PROJECT_ROOT / "data" / "processed" / "features_monthly_modeling.csv"
 OUT_DIR = PROJECT_ROOT / "results" / "holdout_12m"
 
 HOLDOUT_MONTHS = 12
 TARGET_VARIABLE = "soy_price_brl_bag_next_month"
-META_COLUMNS = {
-    "date",
-    "target_month",
-    "target_variable",
-    "target_value",
-    "target_source",
-    "target_series_name",
-}
 
 
 def mape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -135,6 +144,25 @@ def train_test_split_time(target_df: pd.DataFrame, features: list[str]):
     return train_df, test_df, X_train, X_test, y_train, y_test
 
 
+def predict_arima_walkforward(target_df: pd.DataFrame, holdout_months: int) -> np.ndarray:
+    """ARIMA(1,1,0) em walk-forward de 1 passo: a cada mes de teste, reajusta
+    com todo o historico ate ali e preve so' o proximo mes. Mesmo protocolo
+    de 1 passo usado por Random Forest e XGBoost neste holdout."""
+    full_series = target_df["target_value"].astype(float).to_numpy()
+    n = len(full_series)
+    start = n - holdout_months
+    predictions = []
+    for i in range(start, n):
+        train = full_series[:i]
+        try:
+            fitted = ARIMA(train, order=(1, 1, 0)).fit()
+            pred = float(fitted.forecast(steps=1)[0])
+        except Exception:  # noqa: BLE001
+            pred = float(train[-1]) if len(train) else float("nan")
+        predictions.append(pred)
+    return np.asarray(predictions, dtype=float)
+
+
 def run_models(target_df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
     train_df, test_df, X_train, X_test, y_train, y_test = train_test_split_time(target_df, features)
 
@@ -147,8 +175,7 @@ def run_models(target_df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFra
     )
     metrics: list[dict] = []
 
-    arima_fit = ARIMA(y_train, order=(1, 1, 0)).fit()
-    arima_pred = np.asarray(arima_fit.forecast(steps=HOLDOUT_MONTHS), dtype=float)
+    arima_pred = predict_arima_walkforward(target_df, HOLDOUT_MONTHS)
     predictions["arima_1_1_0"] = arima_pred
     metrics.append(evaluate_model("arima_1_1_0", y_test, arima_pred))
 
@@ -192,14 +219,17 @@ def run_models(target_df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFra
 
 def plot_forecast(predictions: pd.DataFrame, out_dir: Path) -> None:
     plot_df = predictions.copy()
-    plot_df["date"] = pd.to_datetime(plot_df["date"])
+    # Eixo X = target_month (o mes AO QUAL o valor previsto pertence), nao
+    # date (o mes de entrada/features). Corrigido na auditoria de 13/09/2026,
+    # item 14 — usar `date` deslocava a previsao de t+1 para a posicao de t.
+    plot_df["target_month"] = pd.to_datetime(plot_df["target_month"])
 
     fig, ax = plt.subplots(figsize=(13, 5))
-    ax.plot(plot_df["date"], plot_df["actual"], marker="o", linewidth=3, color="black", label="Realizado")
+    ax.plot(plot_df["target_month"], plot_df["actual"], marker="o", linewidth=3, color="black", label="Realizado")
     for col in [c for c in plot_df.columns if c not in {"date", "target_month", "actual"}]:
-        ax.plot(plot_df["date"], plot_df[col], marker="o", linewidth=2, label=col)
+        ax.plot(plot_df["target_month"], plot_df[col], marker="o", linewidth=2, label=col)
     ax.set_title("Holdout final de 12 meses — realizado vs. previsto (alvo BRL, t+1)")
-    ax.set_xlabel("Mes previsto")
+    ax.set_xlabel("Mes previsto (target_month)")
     ax.set_ylabel("Preco da soja (R$/saca)")
     ax.legend()
     ax.grid(axis="y", linestyle="--", alpha=0.35)
