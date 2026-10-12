@@ -81,7 +81,12 @@ colunas de anomalia (que foram corrigidas — ver abaixo).
 
 ## Validação
 
-- **Holdout final:** últimos **12 meses** como teste; o restante é treino.
+- **Holdout final:** últimos **12 meses** como origens de previsão, com
+  **walk-forward expansivo de 1 passo para os três modelos** (ARIMA, Random
+  Forest, XGBoost): treina com tudo até `t`, prevê `t+1`, incorpora a nova
+  observação, re-treina e prevê o mês seguinte. Mesmas 12 origens, mesma
+  função, mesmos hiperparâmetros (garantido por
+  `tests/test_holdout_protocol.py`).
 - **Walk-forward 1-passo:** treino mínimo 24 meses; a cada mês treina com o
   passado e prevê o mês seguinte (usado na análise do período de choque
   2020–2022).
@@ -162,7 +167,8 @@ tgsi-ii/
 3. **Anti-vazamento e pareamento temporal:** `pytest tests/ -v` —
    `test_no_leakage.py` garante que as anomalias não usam informação futura;
    `test_target_pairing.py` garante que `target_month = date + 1 mês` mesmo
-   com lacunas na série.
+   com lacunas na série; `test_holdout_protocol.py` garante que ARIMA, RF e
+   XGBoost percorrem as mesmas 12 origens, re-treinando em cada uma.
 4. **Registro da base final:** ver a saída de `build_dataset.py` (linhas,
    período, colunas, % ausentes, hash SHA-256).
 
@@ -184,9 +190,23 @@ tgsi-ii/
 | # | Correção | Onde |
 |---|---|---|
 | 7–11 | `data/raw/` passou a ser **versionado** (inclui a planilha CEPEA); `docs/methodology.md` deixou de estar no `.gitignore`; `pytest` virou dependência de desenvolvimento declarada — um `git clone` novo agora roda `build_dataset.py --offline` e `run_experiments.py` de ponta a ponta | `.gitignore`, `pyproject.toml`, `data/raw/` |
-| 12 | ARIMA no holdout de 12 meses passou a usar **walk-forward de 1 passo** (mesmo protocolo do Random Forest/XGBoost), em vez de um único `forecast(steps=12)` sem atualização | `experiments/holdout_12m.py`, `docs/methodology.md` §5 |
+| 12 | ARIMA no holdout de 12 meses passou a usar **walk-forward de 1 passo** (mesmo horizonte do Random Forest/XGBoost), em vez de um único `forecast(steps=12)` sem atualização — o protocolo de atualização só foi uniformizado no item 18 | `experiments/holdout_12m.py`, `docs/methodology.md` §8.3 |
 | 13 | Classificação de período (pré-choque/choque/pós-choque) passou a usar **`target_month`** (mês previsto), não `date` (mês de entrada) | `experiments/shock_period_analysis.py` |
 | 14 | Gráfico do holdout passou a usar `target_month` no eixo, não `date` | `experiments/holdout_12m.py` |
 | 15 | Conjunto de features padronizado entre `holdout_12m.py` e `shock_period_analysis.py` (mesma constante `METADATA_FIELDS` de `tgsi_pipeline.modeling`) | `experiments/holdout_12m.py`, `experiments/shock_period_analysis.py` |
 | 16 | Pareamento do alvo `t → t+1` passou a usar `target_month = date + 1 mês` explicitamente, em vez de "próxima linha disponível" (protege contra lacunas na série) | `src/tgsi_pipeline/pipeline.py`, `tests/test_target_pairing.py` |
 | 17 | Banda de confiança da correlação cruzada (CCF) passou a usar o N de pares válidos de cada variável, não o tamanho da base completa | `experiments/cross_correlation.py` |
+
+### Uniformização do protocolo do holdout (11/10/2026)
+
+| # | Correção | Onde |
+|---|---|---|
+| 18 | Random Forest e XGBoost passaram a ser **re-treinados a cada mês** do holdout, como o ARIMA: os três usam o mesmo walk-forward expansivo de 1 passo, nas mesmas 12 origens. Origens registradas em `holdout_12m_origins.csv` | `experiments/holdout_12m.py`, `tests/test_holdout_protocol.py`, `docs/methodology.md` §3 e §9 |
+
+Resultado do holdout (12 origens, walk-forward expansivo, alvo BRL):
+
+| Modelo | MAE | RMSE | MAPE (%) | R² |
+|---|---|---|---|---|
+| ARIMA(1,1,0) | 2,8955 | 4,0172 | 2,1694 | 0,3673 |
+| Random Forest | 3,2681 | 4,6678 | 2,4749 | 0,1457 |
+| XGBoost | 3,3408 | 4,8440 | 2,5439 | 0,0800 |

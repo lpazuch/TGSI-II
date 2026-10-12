@@ -10,14 +10,21 @@ CEPEA/ESALQ - Paranagua, R$/saca, um mes a frente).
 Os ultimos 12 meses da serie sao reservados como teste final; o restante
 e usado para treino. Nenhuma observacao futura entra no treino.
 
-Protocolo (corrigido na auditoria de 13/09/2026, item 12): os TRES modelos
-sao avaliados no MESMO horizonte de 1 passo. Random Forest e XGBoost ja
-faziam isso naturalmente (recebem as features observadas em t e preveem
-t+1, uma vez por mes de teste). O ARIMA agora faz o mesmo: em vez de um
-unico ajuste antes do holdout seguido de forecast(steps=12) sem atualizacao,
-ele e' reajustado a cada mes com todo o historico disponivel ate ali
-(walk-forward de janela expansiva) e preve so' o proximo mes. Isso torna a
-comparacao MAE/RMSE/MAPE/R2 entre os tres modelos consistente.
+Protocolo UNICO para os tres modelos — walk-forward expansivo de 1 passo
+(auditoria de 13/09/2026, item 12; uniformizado em 11/10/2026, item 18):
+
+  para cada uma das 12 origens i (as 12 ultimas linhas da base):
+      treina com as linhas [0, i)        (tudo o que se sabe em date[i])
+      preve a linha i                    (preco de target_month[i] = t+1)
+      incorpora a linha i e reajusta do zero para a origem seguinte
+
+ARIMA(1,1,0), Random Forest e XGBoost passam pela MESMA funcao
+``run_walk_forward`` com a MESMA lista de origens (``walk_forward_origins``);
+cada modelo so' difere no ``forecaster`` (ARIMA: serie univariada do alvo;
+RF/XGB: Pipeline imputer+modelo sobre as features). Hiperparametros fixos,
+os mesmos em todas as origens. Antes desta uniformizacao, o ARIMA ja era
+reajustado mes a mes, mas RF/XGB eram treinados uma unica vez antes do
+holdout — ver docs/methodology.md secao 9.
 
 Historico: a versao do TGSI I tambem rodava uma linha de modelagem em USD
 (``soy_price_usd_bag_next_month``) e uma conversao USD->BRL usando o cambio
@@ -28,6 +35,7 @@ experimento oficial em USD.
 
 Saidas em results/holdout_12m/:
   - holdout_12m_predictions.csv   : realizado vs. previsto por modelo
+  - holdout_12m_origins.csv       : as 12 origens de cada modelo (treino/alvo)
   - holdout_12m_metrics.json      : MAE / RMSE / MAPE / R2 por modelo
   - holdout_12m_forecast.png      : grafico realizado vs. previsto
   - holdout_12m_metrics.png       : barras de metricas por modelo
@@ -44,6 +52,7 @@ import math
 import sys
 import warnings
 from pathlib import Path
+from typing import Callable
 
 warnings.filterwarnings("ignore")
 
@@ -134,37 +143,120 @@ def prepare_target_frame(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     return target_df, numeric_features
 
 
-def train_test_split_time(target_df: pd.DataFrame, features: list[str]):
-    train_df = target_df.iloc[:-HOLDOUT_MONTHS].copy()
-    test_df = target_df.iloc[-HOLDOUT_MONTHS:].copy()
-    X_train = train_df[features].copy()
-    X_test = test_df[features].copy()
-    y_train = train_df["target_value"].astype(float).to_numpy()
+def walk_forward_origins(n_obs: int, holdout_months: int) -> list[int]:
+    """Origens de previsao do holdout: indices (posicionais) das linhas de
+    teste. Para cada origem ``i``, o treino e' ``target_df.iloc[:i]`` e a
+    previsao e' feita para a linha ``i`` (features de ``date[i]`` -> preco de
+    ``target_month[i]``). Lista UNICA, compartilhada pelos tres modelos."""
+    if n_obs <= holdout_months:
+        raise ValueError("Observacoes insuficientes para o holdout.")
+    return list(range(n_obs - holdout_months, n_obs))
+
+
+def run_walk_forward(
+    model_name: str,
+    target_df: pd.DataFrame,
+    features: list[str],
+    origins: list[int],
+    forecaster: Callable[[pd.DataFrame, pd.DataFrame, list[str]], float],
+) -> tuple[np.ndarray, list[dict]]:
+    """Walk-forward expansivo de 1 passo, identico para todos os modelos:
+
+        treina com as linhas [0, i)  ->  preve a linha i  ->  i += 1
+
+    A linha ``i-1`` (ultima do treino) tem alvo = preco de ``date[i]``, que ja
+    e' conhecido na origem ``date[i]``; portanto o treino usa exatamente a
+    informacao disponivel no momento da previsao. O modelo e' reajustado do
+    zero em cada origem (``forecaster`` recebe so' o recorte de treino).
+
+    Retorna as previsoes e um registro por origem (para auditoria/teste).
+    """
+    predictions: list[float] = []
+    log: list[dict] = []
+    for i in origins:
+        train = target_df.iloc[:i]
+        test_row = target_df.iloc[i : i + 1]
+        predictions.append(float(forecaster(train, test_row, features)))
+        log.append(
+            {
+                "model": model_name,
+                "origin_index": i,
+                "n_train": len(train),
+                "train_first_date": train["date"].iloc[0],
+                "train_last_date": train["date"].iloc[-1],
+                "train_last_target_month": train["target_month"].iloc[-1],
+                "forecast_date": test_row["date"].iloc[0],
+                "forecast_target_month": test_row["target_month"].iloc[0],
+            }
+        )
+    return np.asarray(predictions, dtype=float), log
+
+
+def arima_forecaster(train: pd.DataFrame, test_row: pd.DataFrame, features: list[str]) -> float:
+    """ARIMA(1,1,0) univariado sobre a serie de alvo do treino; preve 1 passo."""
+    series = train["target_value"].astype(float).to_numpy()
+    try:
+        return float(ARIMA(series, order=(1, 1, 0)).fit().forecast(steps=1)[0])
+    except Exception:  # noqa: BLE001
+        return float(series[-1]) if len(series) else float("nan")
+
+
+def make_tabular_forecaster(model_factory: Callable[[], object]):
+    """Forecaster para RF/XGBoost: novo Pipeline (imputer + modelo) ajustado
+    so' no treino da origem, prevendo a partir das features da linha de teste."""
+
+    def forecaster(train: pd.DataFrame, test_row: pd.DataFrame, features: list[str]) -> float:
+        pipeline = build_tabular_pipeline(model_factory())
+        pipeline.fit(train[features], train["target_value"].astype(float).to_numpy())
+        return float(pipeline.predict(test_row[features])[0])
+
+    return forecaster
+
+
+def random_forest_factory() -> RandomForestRegressor:
+    return RandomForestRegressor(
+        n_estimators=400,
+        max_depth=8,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1,
+    )
+
+
+def xgboost_factory():
+    return XGBRegressor(
+        n_estimators=300,
+        max_depth=3,
+        learning_rate=0.03,
+        subsample=0.9,
+        colsample_bytree=0.8,
+        min_child_weight=1,
+        objective="reg:squarederror",
+        random_state=42,
+    )
+
+
+def build_forecasters() -> dict[str, Callable]:
+    forecasters: dict[str, Callable] = {
+        "arima_1_1_0": arima_forecaster,
+        "random_forest": make_tabular_forecaster(random_forest_factory),
+    }
+    if HAS_XGBOOST:
+        forecasters["xgboost"] = make_tabular_forecaster(xgboost_factory)
+    else:
+        print("[aviso] xgboost nao disponivel; seguindo sem esse modelo.")
+    return forecasters
+
+
+def run_models(
+    target_df: pd.DataFrame,
+    features: list[str],
+    holdout_months: int = HOLDOUT_MONTHS,
+    forecasters: dict[str, Callable] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    origins = walk_forward_origins(len(target_df), holdout_months)
+    test_df = target_df.iloc[origins]
     y_test = test_df["target_value"].astype(float).to_numpy()
-    return train_df, test_df, X_train, X_test, y_train, y_test
-
-
-def predict_arima_walkforward(target_df: pd.DataFrame, holdout_months: int) -> np.ndarray:
-    """ARIMA(1,1,0) em walk-forward de 1 passo: a cada mes de teste, reajusta
-    com todo o historico ate ali e preve so' o proximo mes. Mesmo protocolo
-    de 1 passo usado por Random Forest e XGBoost neste holdout."""
-    full_series = target_df["target_value"].astype(float).to_numpy()
-    n = len(full_series)
-    start = n - holdout_months
-    predictions = []
-    for i in range(start, n):
-        train = full_series[:i]
-        try:
-            fitted = ARIMA(train, order=(1, 1, 0)).fit()
-            pred = float(fitted.forecast(steps=1)[0])
-        except Exception:  # noqa: BLE001
-            pred = float(train[-1]) if len(train) else float("nan")
-        predictions.append(pred)
-    return np.asarray(predictions, dtype=float)
-
-
-def run_models(target_df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    train_df, test_df, X_train, X_test, y_train, y_test = train_test_split_time(target_df, features)
 
     predictions = pd.DataFrame(
         {
@@ -174,47 +266,16 @@ def run_models(target_df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFra
         }
     )
     metrics: list[dict] = []
+    origin_logs: list[dict] = []
 
-    arima_pred = predict_arima_walkforward(target_df, HOLDOUT_MONTHS)
-    predictions["arima_1_1_0"] = arima_pred
-    metrics.append(evaluate_model("arima_1_1_0", y_test, arima_pred))
-
-    rf_model = build_tabular_pipeline(
-        RandomForestRegressor(
-            n_estimators=400,
-            max_depth=8,
-            min_samples_leaf=2,
-            random_state=42,
-            n_jobs=-1,
-        )
-    )
-    rf_model.fit(X_train, y_train)
-    rf_pred = np.asarray(rf_model.predict(X_test), dtype=float)
-    predictions["random_forest"] = rf_pred
-    metrics.append(evaluate_model("random_forest", y_test, rf_pred))
-
-    if HAS_XGBOOST:
-        xgb_model = build_tabular_pipeline(
-            XGBRegressor(
-                n_estimators=300,
-                max_depth=3,
-                learning_rate=0.03,
-                subsample=0.9,
-                colsample_bytree=0.8,
-                min_child_weight=1,
-                objective="reg:squarederror",
-                random_state=42,
-            )
-        )
-        xgb_model.fit(X_train, y_train)
-        xgb_pred = np.asarray(xgb_model.predict(X_test), dtype=float)
-        predictions["xgboost"] = xgb_pred
-        metrics.append(evaluate_model("xgboost", y_test, xgb_pred))
-    else:
-        print("[aviso] xgboost nao disponivel; seguindo sem esse modelo.")
+    for name, forecaster in (forecasters or build_forecasters()).items():
+        pred, log = run_walk_forward(name, target_df, features, origins, forecaster)
+        predictions[name] = pred
+        metrics.append(evaluate_model(name, y_test, pred))
+        origin_logs.extend(log)
 
     metrics_df = pd.DataFrame(metrics).sort_values("mae").reset_index(drop=True)
-    return predictions, metrics_df
+    return predictions, metrics_df, pd.DataFrame(origin_logs)
 
 
 def plot_forecast(predictions: pd.DataFrame, out_dir: Path) -> None:
@@ -228,7 +289,7 @@ def plot_forecast(predictions: pd.DataFrame, out_dir: Path) -> None:
     ax.plot(plot_df["target_month"], plot_df["actual"], marker="o", linewidth=3, color="black", label="Realizado")
     for col in [c for c in plot_df.columns if c not in {"date", "target_month", "actual"}]:
         ax.plot(plot_df["target_month"], plot_df[col], marker="o", linewidth=2, label=col)
-    ax.set_title("Holdout final de 12 meses — realizado vs. previsto (alvo BRL, t+1)")
+    ax.set_title("Holdout 12 meses — walk-forward expansivo 1 passo (alvo BRL, t+1)")
     ax.set_xlabel("Mes previsto (target_month)")
     ax.set_ylabel("Preco da soja (R$/saca)")
     ax.legend()
@@ -241,7 +302,7 @@ def plot_forecast(predictions: pd.DataFrame, out_dir: Path) -> None:
 def plot_metrics(metrics_df: pd.DataFrame, out_dir: Path) -> None:
     fig, ax = plt.subplots(figsize=(10, 5))
     metrics_df.set_index("model")[["mae", "rmse", "mape"]].plot(kind="bar", ax=ax)
-    ax.set_title("Metricas por modelo — holdout de 12 meses")
+    ax.set_title("Metricas por modelo — holdout 12m, walk-forward expansivo 1 passo")
     ax.set_xlabel("Modelo")
     ax.set_ylabel("Valor")
     ax.tick_params(axis="x", rotation=0)
@@ -280,15 +341,17 @@ def main() -> None:
 
     target_df, features = prepare_target_frame(df)
     print(f"Holdout: {HOLDOUT_MONTHS} meses | observacoes: {len(target_df)} | features: {len(features)}")
-    print(f"Treino : {target_df['date'].iloc[0].date()} -> {target_df['date'].iloc[-HOLDOUT_MONTHS - 1].date()}")
-    print(f"Teste  : {target_df['date'].iloc[-HOLDOUT_MONTHS].date()} -> {target_df['date'].iloc[-1].date()}")
+    print("Protocolo: walk-forward expansivo de 1 passo, reajuste mensal (ARIMA, RF e XGBoost)")
+    print(f"Treino inicial: {target_df['date'].iloc[0].date()} -> {target_df['date'].iloc[-HOLDOUT_MONTHS - 1].date()}")
+    print(f"Origens (date): {target_df['date'].iloc[-HOLDOUT_MONTHS].date()} -> {target_df['date'].iloc[-1].date()}")
 
-    predictions, metrics_df = run_models(target_df, features)
+    predictions, metrics_df, origins_df = run_models(target_df, features)
 
     print("\n=== Metricas (holdout 12m, alvo BRL) ===")
     print(metrics_df.to_string(index=False))
 
     predictions.to_csv(OUT_DIR / "holdout_12m_predictions.csv", index=False)
+    origins_df.to_csv(OUT_DIR / "holdout_12m_origins.csv", index=False)
     (OUT_DIR / "holdout_12m_metrics.json").write_text(
         json.dumps(metrics_df.to_dict(orient="records"), indent=2, ensure_ascii=False),
         encoding="utf-8",

@@ -129,13 +129,30 @@ altera nenhuma anomalia já calculada**.
 
 Regra única: **passado → treino, futuro → teste**. Nunca o contrário.
 
-- **Holdout final (`experiments/holdout_12m.py`):** os **últimos 12 meses** da
-  série são o teste; todo o resto é treino. Os três modelos são avaliados no
-  MESMO protocolo de 1 passo: RF e XGBoost preveem cada mês do teste a partir
-  das features observadas naquele mês; o ARIMA é **reajustado a cada mês**
-  (janela expansiva) e faz `forecast(steps=1)` — não um único
-  `forecast(steps=12)` sem atualização (correção da auditoria de 13/09/2026,
-  item 12 — ver §8.3).
+- **Holdout final (`experiments/holdout_12m.py`):** os **últimos 12 meses**
+  da série são as 12 **origens de previsão**. ARIMA(1,1,0), Random Forest e
+  XGBoost seguem **o mesmo protocolo — walk-forward expansivo de 1 passo**:
+
+  ```
+  para cada origem i (as 12 últimas linhas, date = abr/2025 … mar/2026):
+      treina do zero com as linhas [0, i)    (janela expansiva, desde abr/2006)
+      prevê a linha i                         (features de date[i] → preço de target_month[i])
+      incorpora a linha i e passa à origem seguinte
+  ```
+
+  - O treino da 1ª origem tem 228 linhas (date abr/2006 → mar/2025); o da
+    12ª tem 239. A última linha do treino tem como alvo o preço de `date[i]`,
+    que já é conhecido na origem — nenhum alvo posterior a `date[i]` entra.
+  - Os três modelos passam pela **mesma função** (`run_walk_forward`) com a
+    **mesma lista de origens** (`walk_forward_origins`); só muda o
+    `forecaster`: o ARIMA usa a série univariada do alvo; RF e XGBoost usam
+    um `Pipeline` novo (imputação pela mediana + modelo) ajustado só no
+    treino daquela origem, com as 54 features.
+  - Hiperparâmetros fixos e idênticos em todas as origens (sem re-tuning).
+  - As origens efetivamente usadas por cada modelo ficam registradas em
+    `results/holdout_12m/holdout_12m_origins.csv`, e
+    `tests/test_holdout_protocol.py` garante que são as mesmas 12 para os
+    três (ver §9).
 - **Walk-forward 1-passo (`experiments/shock_period_analysis.py`):** treino
   mínimo de 24 meses; a cada mês, treina com tudo até `i-1` e prevê `i`;
   métricas recortadas por período (pré-choque < 2020 / choque 2020–2022 /
@@ -335,11 +352,11 @@ sem atualizar o modelo com os meses reais que iam se revelando. As duas
 tarefas não são equivalentes, e a diferença podia por si só explicar parte do
 resultado comparativo.
 
-**Correção:** `predict_arima_walkforward()` em `holdout_12m.py` reajusta o
-ARIMA a cada um dos 12 meses de teste, usando todo o histórico disponível até
-ali (janela expansiva), e prevê só o próximo mês — o mesmo protocolo de
-`shock_period_analysis.py`. Os três modelos agora são avaliados no mesmo
-horizonte de 1 passo.
+**Correção:** o ARIMA passou a ser reajustado a cada um dos 12 meses de
+teste, com todo o histórico disponível até ali (janela expansiva), prevendo só
+o próximo mês. Isso uniformizou o **horizonte** (1 passo), mas **não** o
+protocolo de atualização: RF e XGBoost continuavam treinados uma única vez
+antes do holdout. A uniformização completa está em §9.
 
 ### 8.4. Features diferentes entre `holdout_12m` e `shock_period_analysis` (item 15)
 
@@ -393,3 +410,59 @@ colunas, intervalo de `date`, intervalo de `target_month`, `target_variable`,
 percentual de ausentes por coluna e o hash SHA-256 do
 `features_monthly_modeling.csv` gerado — para conferência independente sem
 precisar reexecutar o pipeline.
+
+---
+
+## 9. Protocolo de atualização uniforme no holdout (item 18 — 11/10/2026)
+
+**Problema:** após o item 12, os três modelos previam com o mesmo horizonte
+(1 passo), mas com protocolos diferentes:
+
+| Modelo | Antes |
+|---|---|
+| ARIMA(1,1,0) | walk-forward de 1 passo, **reajustado a cada mês** |
+| Random Forest / XGBoost | 1 passo, mas **treinados uma única vez** antes dos 12 meses de holdout |
+
+Um teste independente dos auditores (mesma base, mesmas 54 features, mesmos
+hiperparâmetros, mesmos 12 meses) mostrou que a diferença tinha efeito
+numérico, sobretudo no XGBoost.
+
+**Correção:** `experiments/holdout_12m.py` foi reestruturado para que os três
+modelos usem **um único protocolo — walk-forward expansivo de 1 passo**
+(§3): `walk_forward_origins()` define as 12 origens uma só vez e
+`run_walk_forward()` percorre essas origens para cada modelo, reajustando-o
+do zero com as linhas `[0, i)` e prevendo a linha `i`. Nenhuma outra coisa
+mudou (base, features, hiperparâmetros, meses de teste, métricas).
+
+**Teste:** `tests/test_holdout_protocol.py` verifica, com dados sintéticos,
+que (a) as origens são as 12 últimas linhas; (b) cada modelo é chamado 12
+vezes — um reajuste por origem — e recebe como treino exatamente
+`iloc[:i]` e como teste exatamente `iloc[i]`; (c) nenhum alvo do treino é
+posterior a `date[i]`; (d) o registro de origens é idêntico entre ARIMA, RF e
+XGBoost; (e) com os forecasters reais, RF e XGBoost instanciam um modelo novo
+em cada uma das 12 origens.
+
+**Resultado** (base com SHA-256 `692fc3ce…5e89085`; Python 3.12.6, numpy
+2.4.4, pandas 3.0.2, scikit-learn 1.8.0, xgboost 3.2.0, statsmodels 0.14.6):
+
+| Modelo | Protocolo | MAE | RMSE | MAPE (%) | R² |
+|---|---|---|---|---|---|
+| ARIMA(1,1,0) | walk-forward expansivo | **2,895523** | **4,017159** | **2,169427** | **0,367305** |
+| Random Forest | walk-forward expansivo | 3,268081 | 4,667835 | 2,474877 | 0,145746 |
+| XGBoost | walk-forward expansivo | 3,340820 | 4,844046 | 2,543865 | 0,080032 |
+
+Para referência, a versão anterior (RF/XGB treinados uma vez) dava RF
+MAE 3,141028 / R² 0,204389 e XGBoost MAE 4,091165 / R² −0,738026. O ranking
+(ARIMA < RF < XGBoost em MAE) não mudou; a conclusão de que o ARIMA tem o
+menor erro neste holdout continua válida, agora sob protocolo idêntico.
+
+**Divergência com o teste independente dos auditores:** o ARIMA reproduz
+exatamente (MAE 2,895523). RF (3,268081 vs. 3,273438) e XGBoost (3,340820
+vs. 3,515465) diferem. Nas versões fixadas acima o resultado é
+determinístico (`random_state=42`) e foi conferido com entrada em `DataFrame`
+e em `numpy` (idênticos). Usar um treino de `[0, i-1)` (excluindo a última
+linha) **não** reproduz os números dos auditores (RF 3,471; XGB 3,882). A
+diferença provavelmente vem de versão de biblioteca ou de detalhe de
+implementação do teste independente; a recomparação deve usar
+`results/holdout_12m/holdout_12m_predictions.csv` e
+`holdout_12m_origins.csv` como referência linha a linha.
