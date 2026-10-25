@@ -448,8 +448,8 @@ em cada uma das 12 origens.
 | Modelo | Protocolo | MAE | RMSE | MAPE (%) | R² |
 |---|---|---|---|---|---|
 | ARIMA(1,1,0) | walk-forward expansivo | **2,895523** | **4,017159** | **2,169427** | **0,367305** |
-| Random Forest | walk-forward expansivo | 3,268081 | 4,667835 | 2,474877 | 0,145746 |
-| XGBoost | walk-forward expansivo | 3,340820 | 4,844046 | 2,543865 | 0,080032 |
+| Random Forest | walk-forward expansivo | 3,273438 | 4,647814 | 2,478443 | 0,153058 |
+| XGBoost | walk-forward expansivo | 3,515465 | 4,931411 | 2,676132 | 0,046549 |
 
 Para referência, a versão anterior (RF/XGB treinados uma vez) dava RF
 MAE 3,141028 / R² 0,204389 e XGBoost MAE 4,091165 / R² −0,738026. O ranking
