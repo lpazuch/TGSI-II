@@ -208,5 +208,5 @@ Resultado do holdout (12 origens, walk-forward expansivo, alvo BRL):
 | Modelo | MAE | RMSE | MAPE (%) | R² |
 |---|---|---|---|---|
 | ARIMA(1,1,0) | 2,8955 | 4,0172 | 2,1694 | 0,3673 |
-| Random Forest | 3,2681 | 4,6678 | 2,4749 | 0,1457 |
-| XGBoost | 3,3408 | 4,8440 | 2,5439 | 0,0800 |
+| Random Forest | 3,2673 | 4,6478 | 2,4784 | 0,1530 |
+| XGBoost | 3,5154 | 4,9314 | 2,6761 | 0,0465 |
