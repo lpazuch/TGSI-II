@@ -4,7 +4,6 @@ Decisões metodológicas do projeto e correções feitas em relação ao TGSI I,
 conforme o checkpoint.
 
 ---
-
 ## 1. Objetivo e alvo
 
 Prever o **preço mensal da soja** no indicador **CEPEA/ESALQ – Paranaguá**,
@@ -13,14 +12,12 @@ Prever o **preço mensal da soja** no indicador **CEPEA/ESALQ – Paranaguá**,
 ```
 features do mês t   ->   preço da soja (BRL) no mês t+1
 ```
-
 - **Alvo:** `soy_price_brl_bag_next_month` — R$ por saca de 60 kg.
 - **Unidade analítica:** mês.
 - **Escopo geográfico:** indicador de praça de referência (Paranaguá); as
   variáveis climáticas e de sensoriamento remoto são de um ponto em
   Sorriso–MT, usado como proxy de região produtora.
 - **Horizonte:** t+1 (um passo à frente).
-
 ### 1.1. Alvo em BRL e a questão do USD
 
 A planilha bruta da CEPEA traz também `À vista US$` (`soy_price_usd_bag`). No
@@ -32,7 +29,6 @@ TGSI I havia:
    período de teste.
 
 **Ambas foram removidas no TGSI II.** Motivos:
-
 - o câmbio futuro **não é observável** no momento da previsão; converter com o
   câmbio realizado do holdout produz um número otimista que não representa
   desempenho operacional;
@@ -40,7 +36,6 @@ TGSI I havia:
   duas moedas com tratamentos diferentes enfraquece a defesa metodológica.
 
 O que mudou no código:
-
 - `experiments/holdout_12m.py` não usa mais `soy_price_usd_bag_next_month`,
   `build_usd_to_brl_view()` nem os gráficos USD. Roda só ARIMA / RF / XGBoost
   sobre o alvo BRL.
@@ -50,9 +45,7 @@ O que mudou no código:
   `features_monthly_ml_target.csv` (etapa intermediária), mas **não** entra em
   `features_monthly_modeling.csv`, cujo único `target_variable` é
   `soy_price_brl_bag_next_month`.
-
 ---
-
 ## 2. Anomalias e vazamento temporal (correção prioritária)
 
 ### 2.1. Definição de anomalia
@@ -66,7 +59,6 @@ normal_x(m, t) = média de { x(s) : s < t  e  mês(s) = m }
 
 Ou seja, a "normal" do mês é a média histórica **daquele mês-calendário
 considerando apenas observações anteriores a t**.
-
 ### 2.2. Qual era o problema
 
 No TGSI I a normal era calculada **sobre a série inteira** (função
@@ -75,11 +67,9 @@ anomalia de abril/2006 usava a média de **todos os abris de 2006 a 2026** —
 inclusive futuro. Numa divisão temporal treino/teste (ou walk-forward), isso
 injeta informação do futuro no conjunto de treino: **vazamento temporal
 (look-ahead)**.
-
 Verificação empírica: no dataset antigo, `usd_brl_month_anomaly` já vinha
 preenchido na **primeira** linha (abr/2006) — impossível sem usar abris
 posteriores.
-
 ### 2.3. O que foi corrigido
 
 `src/tgsi_pipeline/pipeline.py` → `_causal_month_normal()`: a normal é
@@ -88,7 +78,6 @@ estritamente anteriores). É exatamente o que um walk-forward de janela
 expansiva calcularia em cada passo.
 
 Consequências no dataset (`features_monthly_modeling.csv`):
-
 - as **12 primeiras linhas** (abr/2006 – mar/2007) passam a ter anomalia
   `None` — não há mês-calendário igual no passado para formar a referência;
 - para `soil_moisture_m3m3` (só a partir de ~2015) a primeira anomalia
@@ -96,25 +85,20 @@ Consequências no dataset (`features_monthly_modeling.csv`):
 - **todas as outras colunas do dataset permanecem idênticas** ao arquivo do
   TGSI I (verificado célula a célula: 0 diferenças fora das 6 colunas de
   anomalia).
-
 ### 2.4. Por que isso funciona na validação temporal / walk-forward
 
 Como cada anomalia usa apenas o passado da própria linha, ela é válida em
 qualquer esquema em que o treino precede o teste:
-
 - **Holdout final:** os 12 meses de teste têm anomalias que só dependem de
   meses anteriores a eles — nenhum valor do teste "vaza" para trás.
 - **Walk-forward / janela expansiva:** no passo `i`, a anomalia da linha `i`
   já foi calculada com dados até `i-1`; recomputar dentro do fold daria o
   mesmo valor. Não é preciso refazer a anomalia por fold.
-
 Teste de regressão: `tests/test_no_leakage.py` — verifica que (a) a primeira
 ocorrência de cada mês tem anomalia `None`, (b) a anomalia é a média dos meses
 iguais estritamente anteriores, e (c) **acrescentar anos futuros à série não
 altera nenhuma anomalia já calculada**.
-
 ### 2.5. Outras transformações que aprendem parâmetros
-
 | Transformação | Onde | Respeita o tempo? |
 |---|---|---|
 | Lags 1/2/3, média móvel 3 | `_build_monthly_ml_features` | Sim — usam só `previous_rows` |
@@ -122,9 +106,7 @@ altera nenhuma anomalia já calculada**.
 | Imputação de faltantes (mediana) | `SimpleImputer` **dentro** do `Pipeline` sklearn nos experimentos | Sim — `fit` só no treino / no `X[:i]` do fold |
 | Padronização / normalização | Não usada nos modelos atuais | — (se for adicionada, deve ficar dentro do `Pipeline`, com `fit` só no treino) |
 | Ordem do ARIMA | Fixa `(1,1,0)` | Não é ajustada nos dados de teste |
-
 ---
-
 ## 3. Validação temporal
 
 Regra única: **passado → treino, futuro → teste**. Nunca o contrário.
@@ -132,14 +114,12 @@ Regra única: **passado → treino, futuro → teste**. Nunca o contrário.
 - **Holdout final (`experiments/holdout_12m.py`):** os **últimos 12 meses**
   da série são as 12 **origens de previsão**. ARIMA(1,1,0), Random Forest e
   XGBoost seguem **o mesmo protocolo — walk-forward expansivo de 1 passo**:
-
   ```
   para cada origem i (as 12 últimas linhas, date = abr/2025 … mar/2026):
       treina do zero com as linhas [0, i)    (janela expansiva, desde abr/2006)
       prevê a linha i                         (features de date[i] → preço de target_month[i])
       incorpora a linha i e passa à origem seguinte
   ```
-
   - O treino da 1ª origem tem 228 linhas (date abr/2006 → mar/2025); o da
     12ª tem 239. A última linha do treino tem como alvo o preço de `date[i]`,
     que já é conhecido na origem — nenhum alvo posterior a `date[i]` entra.
@@ -148,7 +128,8 @@ Regra única: **passado → treino, futuro → teste**. Nunca o contrário.
     `forecaster`: o ARIMA usa a série univariada do alvo; RF e XGBoost usam
     um `Pipeline` novo (imputação pela mediana + modelo) ajustado só no
     treino daquela origem, com as 54 features.
-  - Hiperparâmetros fixos e idênticos em todas as origens (sem re-tuning).
+  - Cada modelo mantém **seus próprios hiperparâmetros**, fixos ao longo das
+    12 origens de previsão (sem nova busca ou ajuste de hiperparâmetros).
   - As origens efetivamente usadas por cada modelo ficam registradas em
     `results/holdout_12m/holdout_12m_origins.csv`, e
     `tests/test_holdout_protocol.py` garante que são as mesmas 12 para os
@@ -159,14 +140,11 @@ Regra única: **passado → treino, futuro → teste**. Nunca o contrário.
   pós-choque ≥ 2023).
 - **Sensibilidade (`experiments/arima_sensitivity.py`):** holdout fixo de 24
   meses, variando a janela de treino (36…216 meses).
-
 k-fold aleatório **não** é usado: quebraria a ordem temporal e vazaria futuro
 para o treino.
 
 ---
-
 ## 4. Período da série e observações "perdidas"
-
 | Item | Valor |
 |---|---|
 | Série CEPEA mensal crua (`target_soy_cepea_monthly.csv`) | **mar/2006 → abr/2026 = 242 meses** |
@@ -175,7 +153,6 @@ para o treino.
 | Entrada do dataset final | abr/2006 → mar/2026 (**240 meses**) |
 | Alvo (t+1) | mai/2006 → abr/2026 (**240 valores**) |
 | **Total: 240 observações** | |
-
 **Por que mar/2006 não aparece:** porque `date_range.start` no config é
 `2006-04-01`. `build_base_rows` só cria linhas mensais a partir dessa data.
 **Não** é efeito de lag nem de janela móvel — essas apenas produzem `NaN` nas
@@ -186,7 +163,6 @@ primeiras linhas, sem removê-las.
 - −1: abr/2026, que não tem mês t+1 para formar o alvo
   (`_build_monthly_modeling_dataset` descarta linhas sem
   `soy_price_brl_bag_next_month`).
-
 Isso é coerente com previsão de um passo à frente.
 
 **A verificar / decisão para o texto:** confirmar que a exclusão de mar/2006
@@ -195,7 +171,6 @@ declará-la explicitamente no TCC). O README do TGSI I mencionava
 `2006-03-01` — desatualizado; os `configs` reais sempre usaram `2006-04-01`.
 
 ---
-
 ## 5. Modelos
 
 O TGSI II trabalha com quatro modelos principais:
@@ -206,7 +181,6 @@ O TGSI II trabalha com quatro modelos principais:
 | **Random Forest** | Não-linear tabular com exógenas | `holdout_12m`, `shock_period` |
 | **XGBoost** | Boosting tabular com exógenas | `holdout_12m`, `shock_period` |
 | **LSTM** | Sequencial (a implementar) | Ver 5.1 |
-
 Baseline de persistência (`naive_last_value`) entra como piso de comparação no
 walk-forward. O motor `tgsi-model-baselines`
 (`src/tgsi_pipeline/modeling.py`) mantém, além desses, um conjunto maior de
@@ -215,7 +189,6 @@ baselines (rolling mean, seasonal naive, ridge, SARIMAX, ensemble,
 
 Nesta fase: **sem** novos algoritmos, **sem** tuning agressivo de
 hiperparâmetros, **sem** novas features, **sem** mudança de metodologia.
-
 ### 5.1. LSTM — situação atual
 
 Ainda **não** há um LSTM real no TGSI II. O slot está reservado:
@@ -226,7 +199,6 @@ posterior; a interface de dados (janela deslizante respeitando a ordem
 temporal) já está pronta.
 
 ---
-
 ## 6. Métricas
 
 Os experimentos reportam **MAE**, **RMSE** e **MAPE**; o holdout adiciona
@@ -237,12 +209,10 @@ forma consistente, não mexer nas métricas.
 ---
 
 ## 7. Reprodutibilidade
-
 ### 7.1. Reconstrução da base
 
 `scripts/build_dataset.py` reconstrói `features_monthly_modeling.csv` a partir
 dos dados de entrada:
-
 - **`--offline` (padrão):** lê `data/raw/*.csv` e roda só as transformações
   (integração → agregação mensal → features → anomalias causais → alvo).
   Não acessa a rede, não precisa de credenciais. É o caminho para quem recebe
@@ -251,11 +221,9 @@ dos dados de entrada:
   INMET, AppEEARS). Exige rede e, para o sensoriamento remoto, as variáveis de
   ambiente `EARTHDATA_USERNAME` / `EARTHDATA_PASSWORD` (e horas de espera no
   AppEEARS).
-
 Verificação: o modo offline reproduz o `features_monthly_modeling.csv` do
 TGSI I com **0 diferenças** fora das 6 colunas de anomalia (que mudaram de
 propósito — item 2).
-
 ### 7.2. Versões de dependências
 
 `requirements.txt` e `pyproject.toml` fixam as versões **efetivamente usadas
@@ -266,19 +234,16 @@ Python 3.14.3):
 numpy 2.4.4 · pandas 3.0.2 · scipy 1.17.1 · scikit-learn 1.8.0
 statsmodels 0.14.6 · matplotlib 3.10.9 · xgboost 3.2.0 · xlrd 2.0.2
 ```
-
 Nenhuma versão foi inventada. A construção da base (`build_dataset.py`
 offline) precisa apenas da biblioteca padrão + `xlrd`; `pandas`, `numpy`,
 `scikit-learn`, `statsmodels`, `matplotlib` e `xgboost` são necessários só
 para os experimentos em `experiments/`.
-
 **A verificar / risco:** o `.venv` original (Python 3.14) apresentou
 lentidão/trava ao importar `scikit-learn` nesta máquina. Recomenda-se recriar
 o ambiente com **Python 3.12** e `pip install -r requirements.txt`. Se alguma
 versão não tiver wheel para o Python escolhido, ajustar para a versão estável
 mais próxima e **registrar a mudança aqui**. A auditoria de 13/09/2026
 instalou com sucesso em **Python 3.13.13**.
-
 ### 7.3. Dependência de desenvolvimento (`pytest`)
 
 `pytest` não é dependência de execução do pipeline — é usada só para rodar
@@ -287,13 +252,11 @@ instalou com sucesso em **Python 3.13.13**.
 auditoria). Instalar com `pip install -e .[dev]`.
 
 ---
-
 ## 8. Auditoria técnica de 13/09/2026 — correções aplicadas
 
 Um clone novo do repositório, em ambiente virtual novo, não conseguia
 reconstruir a base nem rodar os experimentos, e a leitura do código revelou
 inconsistências metodológicas. Abaixo, cada item da auditoria e a correção.
-
 ### 8.1. Cadeia de reprodutibilidade quebrada (itens 4, 7–11)
 
 **Causa raiz:** `data/raw/` estava no `.gitignore`; um clone novo não recebia
@@ -301,7 +264,6 @@ os CSVs de entrada, então nem `build_dataset.py --offline` (faltavam os
 arquivos) nem `--online` (faltava a planilha CEPEA, que também estava
 ignorada via `*.xls`) conseguiam gerar `features_monthly_modeling.csv` —
 e sem essa base, `run_experiments.py` não tinha o que rodar.
-
 **Correção:** `data/raw/` passou a ser **versionado** (é a fonte da verdade
 para reprodução; ver proveniência e hash em `docs/data_sources.md`).
 `data/interim/` e `data/processed/` continuam gerados/ignorados — inclusive
@@ -309,13 +271,11 @@ os próprios CSVs de saída do pipeline, que não fazem mais sentido ficar
 "pré-prontos" no repositório agora que podem ser reconstruídos. `docs/methodology.md`
 (este arquivo) também estava incorretamente listado no `.gitignore` e passou
 a ser versionado.
-
 **Consequência da correção de vazamento (§2) sobre os resultados:** ao
 corrigir a fuga de informação futura nas anomalias, os modelos de aprendizado
 de máquina (RF/XGBoost) deixaram de usar uma vantagem artificial. Isso é
 esperado e é exatamente o efeito que a correção deveria ter — não é sinal de
 regressão.
-
 ### 8.2. `date` vs. `target_month` (itens 13 e 14)
 
 Convenção da base (não mudou, só a *leitura* que o código fazia dela):
@@ -327,23 +287,19 @@ target_month = t + 1 (mes ao qual o valor previsto/avaliado pertence)
 
 Exemplo: `date=2019-12-01`, `target_month=2020-01-01` → previsão do preço de
 janeiro/2020, usando dados de dezembro/2019.
-
 **Problema encontrado:** `experiments/shock_period_analysis.py` indexava a
 série e classificava pré-choque/choque/pós-choque por `date`, não por
 `target_month` — deslocando as fronteiras da análise em um mês (o preço
 avaliado como "de janeiro/2020" era na verdade rotulado pelo mês de entrada,
 dezembro/2019). O mesmo deslocamento aparecia no eixo X do gráfico de
 `experiments/holdout_12m.py`.
-
 **Correção:** `shock_period_analysis.py` agora indexa a série alvo, os
 walk-forwards e a classificação de período por `target_month`; a coluna
 temporal do `shock_period_walkforward.csv` passou a se chamar `target_month`
 (antes `date`). `holdout_12m.py` usa `target_month` no eixo X do gráfico de
 previsões. `SHOCK_START`/`SHOCK_END` (2020-01-01 / 2022-12-01) agora são
 lidos como fronteiras sobre o mês previsto, que é a leitura correta.
-
 ### 8.3. ARIMA fora do protocolo de 1 passo no holdout (item 12)
-
 **Problema:** no holdout de 12 meses, RF e XGBoost já operavam em 1 passo
 (recebem features de `t`, preveem `t+1`, uma vez por mês de teste — 12
 previsões `X_t → P_{t+1}`). O ARIMA era ajustado **uma única vez** antes do
@@ -351,27 +307,23 @@ holdout e chamava `forecast(steps=12)`: uma previsão de 12 passos à frente,
 sem atualizar o modelo com os meses reais que iam se revelando. As duas
 tarefas não são equivalentes, e a diferença podia por si só explicar parte do
 resultado comparativo.
-
 **Correção:** o ARIMA passou a ser reajustado a cada um dos 12 meses de
 teste, com todo o histórico disponível até ali (janela expansiva), prevendo só
 o próximo mês. Isso uniformizou o **horizonte** (1 passo), mas **não** o
 protocolo de atualização: RF e XGBoost continuavam treinados uma única vez
 antes do holdout. A uniformização completa está em §9.
-
 ### 8.4. Features diferentes entre `holdout_12m` e `shock_period_analysis` (item 15)
 
 **Problema:** `holdout_12m.py` incluía `soy_price_brl_bag`/`soy_price_usd_bag`
 (o preço observado no mês corrente) como feature; `shock_period_analysis.py`
 excluía essas duas colunas explicitamente. "Random Forest" e "XGBoost" não
 eram, portanto, a mesma especificação de modelo nos dois experimentos.
-
 **Correção:** os dois scripts agora importam a mesma constante,
 `tgsi_pipeline.modeling.METADATA_FIELDS`, para decidir o que é metadado
 (excluído) vs. feature. A decisão adotada foi **manter** o preço corrente
 como feature em ambos os experimentos — ele é informação legitimamente
 disponível em `t` para prever `t+1` (não é vazamento), e é o que torna RF/XGB
 competitivos com a persistência ingênua.
-
 ### 8.5. Pareamento `t → t+1` por posição, não por calendário (item 16)
 
 **Problema:** `_attach_monthly_target()` pareava cada mês com o "próximo item
@@ -379,7 +331,6 @@ da lista ordenada" de meses-alvo disponíveis, não com `date + 1 mês`
 explicitamente. Se a série CEPEA tivesse uma lacuna (um mês sem cotação),
 esse pareamento por posição associaria incorretamente um mês ao alvo de um
 mês mais distante.
-
 **Correção:** o pareamento agora usa `_next_month_start(date)` (aritmética de
 calendário) e só preenche `soy_price_brl_bag_next_month` se esse mês exato
 existir na série de alvo — senão fica `None`. Na série real usada
@@ -387,21 +338,18 @@ existir na série de alvo — senão fica `None`. Na série real usada
 resultado é idêntico ao anterior; a correção é uma proteção estrutural, não
 uma mudança nos 240 valores atuais. Regressão em
 `tests/test_target_pairing.py`, incluindo um caso sintético com lacuna.
-
 ### 8.6. Banda de confiança da CCF com N incorreto (item 17)
 
 **Problema:** em `experiments/cross_correlation.py`, a banda `±1.96/√N` usava
 o tamanho da base completa (`len(df)`) para todas as variáveis, mesmo para
 `soil_moisture_m3m3`, que só tem histórico a partir de ~2015 (N efetivo bem
 menor).
-
 **Correção:** `N` passou a ser o número de pares válidos *daquela variável*
 (`len(valid)`, já calculado por feature). O script agora também imprime um
 aviso explícito: em série temporal autocorrelacionada (o caso desta série
 mensal), essa banda é uma referência visual, não um teste de significância
 estatística formal — não deve ser citada como evidência conclusiva sem
 ressalva.
-
 ### 8.7. Registro da base final (Passo 6 da auditoria)
 
 `scripts/build_dataset.py` agora imprime e grava, ao final,
@@ -412,7 +360,6 @@ percentual de ausentes por coluna e o hash SHA-256 do
 precisar reexecutar o pipeline.
 
 ---
-
 ## 9. Protocolo de atualização uniforme no holdout (item 18 — 11/10/2026)
 
 **Problema:** após o item 12, os três modelos previam com o mesmo horizonte
@@ -422,18 +369,15 @@ precisar reexecutar o pipeline.
 |---|---|
 | ARIMA(1,1,0) | walk-forward de 1 passo, **reajustado a cada mês** |
 | Random Forest / XGBoost | 1 passo, mas **treinados uma única vez** antes dos 12 meses de holdout |
-
-Um teste independente dos auditores (mesma base, mesmas 54 features, mesmos
-hiperparâmetros, mesmos 12 meses) mostrou que a diferença tinha efeito
-numérico, sobretudo no XGBoost.
-
+Uma comparação independente anterior (mesma base, mesmas 54 features, mesmos
+hiperparâmetros por modelo, mesmos 12 meses) mostrou que a diferença tinha
+efeito numérico, sobretudo no XGBoost.
 **Correção:** `experiments/holdout_12m.py` foi reestruturado para que os três
 modelos usem **um único protocolo — walk-forward expansivo de 1 passo**
 (§3): `walk_forward_origins()` define as 12 origens uma só vez e
 `run_walk_forward()` percorre essas origens para cada modelo, reajustando-o
 do zero com as linhas `[0, i)` e prevendo a linha `i`. Nenhuma outra coisa
 mudou (base, features, hiperparâmetros, meses de teste, métricas).
-
 **Teste:** `tests/test_holdout_protocol.py` verifica, com dados sintéticos,
 que (a) as origens são as 12 últimas linhas; (b) cada modelo é chamado 12
 vezes — um reajuste por origem — e recebe como treino exatamente
@@ -441,7 +385,6 @@ vezes — um reajuste por origem — e recebe como treino exatamente
 posterior a `date[i]`; (d) o registro de origens é idêntico entre ARIMA, RF e
 XGBoost; (e) com os forecasters reais, RF e XGBoost instanciam um modelo novo
 em cada uma das 12 origens.
-
 **Resultado** (base com SHA-256 `692fc3ce…5e89085`; Python 3.12.6, numpy
 2.4.4, pandas 3.0.2, scikit-learn 1.8.0, xgboost 3.2.0, statsmodels 0.14.6):
 
@@ -450,19 +393,21 @@ em cada uma das 12 origens.
 | ARIMA(1,1,0) | walk-forward expansivo | **2,895523** | **4,017159** | **2,169427** | **0,367305** |
 | Random Forest | walk-forward expansivo | 3,273438 | 4,647814 | 2,478443 | 0,153058 |
 | XGBoost | walk-forward expansivo | 3,515465 | 4,931411 | 2,676132 | 0,046549 |
-
 Para referência, a versão anterior (RF/XGB treinados uma vez) dava RF
 MAE 3,141028 / R² 0,204389 e XGBoost MAE 4,091165 / R² −0,738026. O ranking
 (ARIMA < RF < XGBoost em MAE) não mudou; a conclusão de que o ARIMA tem o
 menor erro neste holdout continua válida, agora sob protocolo idêntico.
 
-**Divergência com o teste independente dos auditores:** o ARIMA reproduz
-exatamente (MAE 2,895523). RF (3,268081 vs. 3,273438) e XGBoost (3,340820
-vs. 3,515465) diferem. Nas versões fixadas acima o resultado é
-determinístico (`random_state=42`) e foi conferido com entrada em `DataFrame`
-e em `numpy` (idênticos). Usar um treino de `[0, i-1)` (excluindo a última
-linha) **não** reproduz os números dos auditores (RF 3,471; XGB 3,882). A
-diferença provavelmente vem de versão de biblioteca ou de detalhe de
-implementação do teste independente; a recomparação deve usar
-`results/holdout_12m/holdout_12m_predictions.csv` e
-`holdout_12m_origins.csv` como referência linha a linha.
+**Conferência independente posterior (13/10/2026):** na comparação inicial,
+mesmo após a correção do protocolo, foram observadas diferenças nos valores de
+Random Forest e XGBoost em relação a uma execução independente. Uma nova
+execução, a partir de um clone do repositório, reproduziu os resultados dos
+três modelos apresentados na tabela acima. Também foram conferidas as mesmas
+12 origens de previsão por modelo, registradas em
+`results/holdout_12m/holdout_12m_origins.csv` (36 procedimentos no total).
+Portanto, a divergência numérica daquela comparação inicial foi resolvida e
+não permanece como pendência de reprodutibilidade computacional do holdout.
+
+Essa conferência não substitui a verificação científica da proveniência dos
+dados, da disponibilidade temporal das variáveis explicativas e de eventuais
+riscos de vazamento associados às fontes e datas efetivas de publicação.

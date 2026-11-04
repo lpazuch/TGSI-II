@@ -15,9 +15,7 @@ features do mês t   →   preço da soja (R$/saca) no mês t+1
 
 Alvo: `soy_price_brl_bag_next_month` (R$ por saca de 60 kg). Horizonte t+1.
 Unidade analítica: mês. Escopo geográfico: indicador de praça de referência.
-
 ## Dados
-
 | Grupo | Fonte | Variáveis |
 |---|---|---|
 | Alvo | CEPEA/ESALQ – Paranaguá (planilha `.xls`) | `soy_price_brl_bag`, `soy_price_usd_bag` |
@@ -26,21 +24,17 @@ Unidade analítica: mês. Escopo geográfico: indicador de praça de referência
 | Clima | INMET (estação A904) · fallback NASA POWER | precipitação, temperatura, umidade, vento |
 | NDVI | NASA MODIS `MOD13Q1.061` via AppEEARS | `ndvi` |
 | Umidade do solo | NASA SMAP `SPL3SMP_E.006` via AppEEARS (desde 2015) | `soil_moisture_m3m3` |
-
 Ponto geográfico: Sorriso–MT (−12,5425 / −55,7211).
-Janela: **abr/2006 → abr/2026**; base final com **240 observações mensais**.
+Na base final, os **240 pares mensais** correspondem a entradas de **abr/2006 a mar/2026** (`date`) e a alvos de **mai/2006 a abr/2026** (`target_month`).
 Detalhes de origem, frequência, transformação e unidade de cada variável:
 **[`docs/data_sources.md`](docs/data_sources.md)**.
-
 > **Os dados de entrada são versionados** em `data/raw/` (CSVs + a planilha
 > `CEPEA_20260407190923.xls`, hash SHA-256 registrado em
 > [`docs/data_sources.md`](docs/data_sources.md)) — é o que permite `git clone`
 > → `build_dataset.py --offline` funcionar sem rede nem credenciais.
 > `data/interim/` e `data/processed/` são **gerados** pelo pipeline e não são
 > versionados (regenerados a cada execução).
-
 ## Pipeline — como a base é construída
-
 ```
 data/raw/  (CSVs de entrada + CEPEA_*.xls)
     │  leitura + coerção de tipos
@@ -56,7 +50,6 @@ seleção de colunas de modelagem                      (tgsi_pipeline._build_mon
     ▼
 data/processed/features_monthly_modeling.csv
 ```
-
 Comando:
 
 ```bash
@@ -66,9 +59,7 @@ PYTHONPATH=src python scripts/build_dataset.py --online   # re-baixa das fontes 
 
 O modo offline reproduz o dataset do TGSI I com **0 diferenças** fora das
 colunas de anomalia (que foram corrigidas — ver abaixo).
-
 ## Variáveis
-
 - **Alvo:** `soy_price_brl_bag_next_month` (R$/saca, t+1).
 - **Exógenas (nível):** `usd_brl`, `brent_usd_bbl`, clima, `ndvi`,
   `soil_moisture_m3m3`.
@@ -78,24 +69,22 @@ colunas de anomalia (que foram corrigidas — ver abaixo).
   `soy_planting_window`, `soy_harvest_window`.
 - `soy_price_usd_bag` permanece como variável explicativa / rastreabilidade —
   **não** é um alvo (ver `docs/methodology.md`).
-
 ## Validação
-
 - **Holdout final:** últimos **12 meses** como origens de previsão, com
   **walk-forward expansivo de 1 passo para os três modelos** (ARIMA, Random
   Forest, XGBoost): treina com tudo até `t`, prevê `t+1`, incorpora a nova
-  observação, re-treina e prevê o mês seguinte. Mesmas 12 origens, mesma
-  função, mesmos hiperparâmetros (garantido por
-  `tests/test_holdout_protocol.py`).
+  observação, re-treina e prevê o mês seguinte. São as mesmas 12 origens e o
+  mesmo protocolo de atualização para os três modelos. **Cada algoritmo
+  mantém seus próprios hiperparâmetros fixos ao longo das 12 origens**, sem
+  nova busca ou ajuste de hiperparâmetros durante o holdout. O teste
+  `tests/test_holdout_protocol.py` verifica as origens e o re-treinamento.
 - **Walk-forward 1-passo:** treino mínimo 24 meses; a cada mês treina com o
   passado e prevê o mês seguinte (usado na análise do período de choque
   2020–2022).
 - **Sensibilidade:** holdout fixo de 24 meses, variando a janela de treino.
-
 Regra: **passado → treino, futuro → teste**. Sem k-fold aleatório.
 Transformações que aprendem parâmetros (imputação, anomalias) respeitam a
 ordem temporal. Detalhes: **[`docs/methodology.md`](docs/methodology.md)**.
-
 ## Modelos
 
 | Modelo | Situação |
@@ -107,7 +96,6 @@ ordem temporal. Detalhes: **[`docs/methodology.md`](docs/methodology.md)**.
 
 Baseline de persistência (`naive_last_value`) como piso de comparação.
 Nesta fase: sem novos algoritmos, sem tuning agressivo, sem novas features.
-
 ## Execução
 
 **Python 3.12** (o ambiente original de desenvolvimento do TGSI I era 3.14.3;
@@ -122,7 +110,6 @@ pip install -e .[dev]                # pacote tgsi_pipeline + pytest
 
 # 1) construir a base (data/raw/ já vem com o repositório)
 PYTHONPATH=src python scripts/build_dataset.py
-
 # 2) rodar todos os experimentos
 PYTHONPATH=src python scripts/run_experiments.py
 
@@ -134,9 +121,7 @@ Resultados (figuras, métricas, previsões) vão para `results/<experimento>/`.
 `build_dataset.py` imprime, ao final, o número de linhas, o intervalo
 temporal, o número de colunas, o percentual de ausentes e o hash SHA-256 do
 CSV gerado — para conferência independente.
-
 ## Estrutura
-
 ```
 tgsi-ii/
 ├── configs/           configuração do pipeline (janela, fontes, alvo)
@@ -153,9 +138,7 @@ tgsi-ii/
 ├── tests/               inclui test_no_leakage.py e test_target_pairing.py
 └── docs/               methodology.md · data_sources.md · checkpoint_history.md
 ```
-
 ## Reprodutibilidade
-
 1. **Base:** `scripts/build_dataset.py --offline` (padrão) reconstrói
    `features_monthly_modeling.csv` a partir de `data/raw/`, que **é
    versionado** — funciona logo após `git clone`, sem rede nem credenciais.
@@ -171,11 +154,8 @@ tgsi-ii/
    XGBoost percorrem as mesmas 12 origens, re-treinando em cada uma.
 4. **Registro da base final:** ver a saída de `build_dataset.py` (linhas,
    período, colunas, % ausentes, hash SHA-256).
-
 ## Correções aplicadas
-
 ### Checkpoint do professor (27/08/2026)
-
 | # | Correção | Onde |
 |---|---|---|
 | 1 | Anomalias mensais **causais** (normal só com passado) — elimina look-ahead | `src/tgsi_pipeline/pipeline.py`, `tests/test_no_leakage.py`, `docs/methodology.md` §2 |
@@ -184,9 +164,7 @@ tgsi-ii/
 | 4 | Origem/transformação de cada fonte consolidada | `docs/data_sources.md` |
 | 5 | `requirements.txt` com versões explícitas | `requirements.txt`, `pyproject.toml` |
 | 6 | Base reproduzível a partir dos dados de entrada (modo offline) | `scripts/build_dataset.py` |
-
 ### Auditoria técnica (13/09/2026)
-
 | # | Correção | Onde |
 |---|---|---|
 | 7–11 | `data/raw/` passou a ser **versionado** (inclui a planilha CEPEA); `docs/methodology.md` deixou de estar no `.gitignore`; `pytest` virou dependência de desenvolvimento declarada — um `git clone` novo agora roda `build_dataset.py --offline` e `run_experiments.py` de ponta a ponta | `.gitignore`, `pyproject.toml`, `data/raw/` |
@@ -196,7 +174,6 @@ tgsi-ii/
 | 15 | Conjunto de features padronizado entre `holdout_12m.py` e `shock_period_analysis.py` (mesma constante `METADATA_FIELDS` de `tgsi_pipeline.modeling`) | `experiments/holdout_12m.py`, `experiments/shock_period_analysis.py` |
 | 16 | Pareamento do alvo `t → t+1` passou a usar `target_month = date + 1 mês` explicitamente, em vez de "próxima linha disponível" (protege contra lacunas na série) | `src/tgsi_pipeline/pipeline.py`, `tests/test_target_pairing.py` |
 | 17 | Banda de confiança da correlação cruzada (CCF) passou a usar o N de pares válidos de cada variável, não o tamanho da base completa | `experiments/cross_correlation.py` |
-
 ### Uniformização do protocolo do holdout (11/10/2026)
 
 | # | Correção | Onde |
@@ -204,9 +181,8 @@ tgsi-ii/
 | 18 | Random Forest e XGBoost passaram a ser **re-treinados a cada mês** do holdout, como o ARIMA: os três usam o mesmo walk-forward expansivo de 1 passo, nas mesmas 12 origens. Origens registradas em `holdout_12m_origins.csv` | `experiments/holdout_12m.py`, `tests/test_holdout_protocol.py`, `docs/methodology.md` §3 e §9 |
 
 Resultado do holdout (12 origens, walk-forward expansivo, alvo BRL):
-
 | Modelo | MAE | RMSE | MAPE (%) | R² |
 |---|---|---|---|---|
 | ARIMA(1,1,0) | 2,8955 | 4,0172 | 2,1694 | 0,3673 |
-| Random Forest | 3,2673 | 4,6478 | 2,4784 | 0,1530 |
-| XGBoost | 3,5154 | 4,9314 | 2,6761 | 0,0465 |
+| Random Forest | 3,2734 | 4,6478 | 2,4784 | 0,1531 |
+| XGBoost | 3,5155 | 4,9314 | 2,6761 | 0,0465 |
