@@ -82,6 +82,16 @@ colunas de anomalia (que foram corrigidas — ver abaixo).
   passado e prevê o mês seguinte (usado na análise do período de choque
   2020–2022).
 - **Sensibilidade:** holdout fixo de 24 meses, variando a janela de treino.
+- **Seleção de variáveis + ablação (`experiments/ablation.py`):** importância
+  por permutação (por variável de origem, em validação abr/2019–mar/2021,
+  anterior a todo o teste) seleciona as variáveis relevantes de RF e XGBoost;
+  depois, ablação removendo uma relevante por vez, sob o mesmo walk-forward
+  expansivo do holdout, em 12 e 60 origens. Ver `docs/methodology.md` §10.
+- **Teste de Diebold-Mariano (`experiments/diebold_mariano.py`):** correção
+  HLN, perda absoluta. No holdout de 12 meses nenhuma diferença é
+  significativa; nas 216 previsões do walk-forward, ARIMA e persistência são
+  significativamente mais precisos que RF/XGBoost (p < 0,001) e empatados entre
+  si (p = 0,11). Ver `docs/methodology.md` §11.
 Regra: **passado → treino, futuro → teste**. Sem k-fold aleatório.
 Transformações que aprendem parâmetros (imputação, anomalias) respeitam a
 ordem temporal. Detalhes: **[`docs/methodology.md`](docs/methodology.md)**.
@@ -129,7 +139,7 @@ tgsi-ii/
 │                       features, alvo (+ motor de baselines em modeling.py)
 ├── scripts/            build_dataset.py (constrói a base) · run_experiments.py
 ├── experiments/        holdout_12m · arima_residuals · arima_sensitivity ·
-│                       cross_correlation · shock_period_analysis
+│                       cross_correlation · shock_period_analysis · ablation
 ├── data/
 │   ├── raw/            VERSIONADO — dados de entrada (CSVs + planilha CEPEA)
 │   ├── interim/        gerado, não versionado
@@ -180,9 +190,11 @@ tgsi-ii/
 |---|---|---|
 | 18 | Random Forest e XGBoost passaram a ser **re-treinados a cada mês** do holdout, como o ARIMA: os três usam o mesmo walk-forward expansivo de 1 passo, nas mesmas 12 origens. Origens registradas em `holdout_12m_origins.csv` | `experiments/holdout_12m.py`, `tests/test_holdout_protocol.py`, `docs/methodology.md` §3 e §9 |
 
-Resultado do holdout (12 origens, walk-forward expansivo, alvo BRL):
+Resultado do holdout (12 origens, walk-forward expansivo, alvo BRL — execução
+de 09/11/2026, a mesma usada no artigo final; ver `docs/methodology.md` §9):
 | Modelo | MAE | RMSE | MAPE (%) | R² |
 |---|---|---|---|---|
 | ARIMA(1,1,0) | 2,8955 | 4,0172 | 2,1694 | 0,3673 |
-| Random Forest | 3,2734 | 4,6478 | 2,4784 | 0,1531 |
-| XGBoost | 3,5155 | 4,9314 | 2,6761 | 0,0465 |
+| Persistência ingênua (referência) | 2,9583 | 3,9795 | 2,2191 | 0,3791 |
+| Random Forest | 3,2681 | 4,6678 | 2,4749 | 0,1457 |
+| XGBoost | 3,3408 | 4,8440 | 2,5439 | 0,0800 |

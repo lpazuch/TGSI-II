@@ -27,6 +27,10 @@ warnings.filterwarnings("ignore")
 import matplotlib
 matplotlib.use("Agg")  # headless: salva PNGs sem display
 import matplotlib.pyplot as plt
+
+# legibilidade na impressao: a figura entra com ~15 cm de largura no artigo
+plt.rcParams.update({"font.size": 13, "axes.titlesize": 14, "axes.labelsize": 13,
+                     "xtick.labelsize": 12, "ytick.labelsize": 12})
 import numpy as np
 import pandas as pd
 
@@ -77,7 +81,7 @@ def plot_ccf_group(
         return {}
 
     n = len(available)
-    fig, axes = plt.subplots(n, 1, figsize=(11, 3.8 * n), constrained_layout=True)
+    fig, axes = plt.subplots(n, 1, figsize=(9, 2.9 * n), constrained_layout=True)
     if n == 1:
         axes = [axes]
 
@@ -108,7 +112,7 @@ def plot_ccf_group(
         ax.set_xlabel("Lag (meses)")
         ax.set_ylabel("Correlação")
         ax.set_xticks(lags)
-        ax.legend(fontsize=8, loc="upper right")
+        ax.legend(fontsize=11, loc="best")
 
         best_idx = int(np.argmax(np.abs(cors)))
         best_lag = int(lags[best_idx])
@@ -135,7 +139,7 @@ def plot_ccf_group(
         .replace("ó", "o")
         .replace("ô", "o")
     )
-    fig.suptitle(f"Correlação Cruzada — {group_name}", fontsize=13, fontweight="bold")
+    fig.suptitle(f"Correlação Cruzada — {group_name}", fontsize=15, fontweight="bold")
     out_path = out_dir / f"ccf_{slug}.png"
     fig.savefig(out_path, dpi=150)
     plt.close(fig)

@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """
-Análise de resíduos do modelo ARIMA(1,1,0) — soja CEPEA/ESALQ Paranaguá.
+Diagnostico do ARIMA(1,1,0) e comparacao de especificacoes — soja CEPEA/ESALQ.
 
-Gera:
-  - residuals_time.png   : resíduos ao longo do tempo
-  - residuals_acf.png    : ACF dos resíduos
-  - residuals_pacf.png   : PACF dos resíduos
-  - residuals_hist.png   : histograma dos resíduos
-  - residual_analysis.json : estatísticas + teste Ljung-Box
+Tudo aqui usa SOMENTE dados anteriores ao holdout oficial (meses-alvo
+mai/2025 -> abr/2026, ver holdout_12m.py). Revisao de 16/11/2026: a versao
+anterior treinava ate abr/2024 e media o MAE em mai/2024 -> abr/2026, janela
+que continha os 12 meses do holdout.
+
+Janelas (serie mensal a partir de abr/2006; mar/2006 e' mes parcial e fica
+fora, como na base de modelagem):
+  - treino     : abr/2006 -> abr/2023 (205 obs) — ajuste, AIC e residuos
+  - validacao  : mai/2023 -> abr/2025 (24 meses) — MAE de 1 passo,
+                 walk-forward expansivo (reajuste a cada mes)
+  - holdout    : mai/2025 -> abr/2026 — NAO e' usado neste script
+
+Gera em results/arima_residuals/:
+  - residuals_time.png / residuals_acf.png / residuals_pacf.png / residuals_hist.png
+  - residual_analysis.json : estatisticas, Ljung-Box e comparacao de especificacoes
+  - spec_comparison.csv    : AIC (treino) e MAE (validacao) por especificacao
 
 Uso:
   PYTHONPATH=src python experiments/arima_residuals.py
@@ -24,6 +34,10 @@ warnings.filterwarnings("ignore")
 import matplotlib
 matplotlib.use("Agg")  # headless: salva PNGs sem display
 import matplotlib.pyplot as plt
+
+# legibilidade na impressao (figuras com ~15 cm no artigo)
+plt.rcParams.update({"font.size": 14, "axes.titlesize": 15, "axes.labelsize": 14,
+                     "xtick.labelsize": 13, "ytick.labelsize": 13})
 import numpy as np
 import pandas as pd
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
@@ -34,15 +48,50 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_FILE = PROJECT_ROOT / "data" / "raw" / "target_soy_cepea_monthly.csv"
 OUT_DIR = PROJECT_ROOT / "results" / "arima_residuals"
 
-HOLDOUT_MONTHS = 24
+SERIES_START = "2006-04-01"        # mar/2006 e' mes parcial (fora, como na base de modelagem)
+FIRST_HOLDOUT_TARGET = "2025-05-01" # primeiro mes-alvo do holdout oficial de 12 meses
+VALIDATION_MONTHS = 24
 ARIMA_ORDER = (1, 1, 0)
+CANDIDATE_ORDERS = [(1, 1, 0), (0, 1, 1), (1, 1, 1), (2, 1, 0), (2, 1, 1)]
 LJUNG_BOX_LAGS = [6, 12, 18, 24]
 
 
 def load_series(path: Path) -> pd.Series:
     df = pd.read_csv(path, parse_dates=["date"])
     df = df.sort_values("date").dropna(subset=["soy_price_brl_bag"]).reset_index(drop=True)
+    df = df[df["date"] >= pd.Timestamp(SERIES_START)]
     return pd.Series(df["soy_price_brl_bag"].values, index=df["date"], name="soy_price_brl_bag")
+
+
+def split_windows(series: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Treino e validacao, ambos estritamente anteriores ao holdout oficial."""
+    pre = series[series.index < pd.Timestamp(FIRST_HOLDOUT_TARGET)]
+    if len(pre) <= VALIDATION_MONTHS:
+        raise ValueError("Serie curta demais antes do holdout.")
+    return pre.iloc[:-VALIDATION_MONTHS], pre.iloc[-VALIDATION_MONTHS:]
+
+
+def one_step_mae(train: pd.Series, valid: pd.Series, order: tuple) -> float:
+    """MAE de 1 passo em walk-forward expansivo, reajustando a cada mes."""
+    history = list(train.values)
+    errors = []
+    for y in valid.values:
+        fc = ARIMA(np.asarray(history), order=order).fit().forecast(1)[0]
+        errors.append(abs(y - fc))
+        history.append(y)
+    return float(np.mean(errors))
+
+
+def compare_specs(train: pd.Series, valid: pd.Series) -> pd.DataFrame:
+    rows = []
+    for order in CANDIDATE_ORDERS:
+        aic = ARIMA(train.values, order=order).fit().aic
+        rows.append({"order": f"ARIMA{order}", "aic_train": round(float(aic), 2),
+                     "mae_valid": round(one_step_mae(train, valid, order), 3)})
+    persist = np.concatenate([[train.values[-1]], valid.values[:-1]])
+    rows.append({"order": "persistencia", "aic_train": None,
+                 "mae_valid": round(float(np.mean(np.abs(valid.values - persist))), 3)})
+    return pd.DataFrame(rows)
 
 
 def run_ljung_box(residuals: np.ndarray, lags: list[int]) -> list[dict]:
@@ -75,6 +124,8 @@ def plot_residuals(residuals: np.ndarray, dates: pd.DatetimeIndex, out_dir: Path
 
     fig, ax = plt.subplots(figsize=(10, 4))
     plot_acf(residuals, lags=24, ax=ax, title="ACF dos Resíduos — ARIMA(1,1,0)")
+    ax.set_xlabel("Defasagem (meses)")
+    ax.set_ylabel("Autocorrelação")
     plt.tight_layout()
     fig.savefig(out_dir / "residuals_acf.png", dpi=150)
     plt.close(fig)
@@ -82,6 +133,8 @@ def plot_residuals(residuals: np.ndarray, dates: pd.DatetimeIndex, out_dir: Path
 
     fig, ax = plt.subplots(figsize=(10, 4))
     plot_pacf(residuals, lags=24, ax=ax, title="PACF dos Resíduos — ARIMA(1,1,0)", method="ywm")
+    ax.set_xlabel("Defasagem (meses)")
+    ax.set_ylabel("Autocorrelação parcial")
     plt.tight_layout()
     fig.savefig(out_dir / "residuals_pacf.png", dpi=150)
     plt.close(fig)
@@ -105,29 +158,33 @@ def main() -> None:
     series = load_series(DATA_FILE)
     print(f"Série: {len(series)} obs | {series.index[0].date()} → {series.index[-1].date()}")
 
-    train = series.iloc[:-HOLDOUT_MONTHS]
-    holdout_start = series.index[-HOLDOUT_MONTHS].date()
-    holdout_end = series.index[-1].date()
-    print(f"Treino: {len(train)} obs | Holdout reservado: {holdout_start} → {holdout_end}")
+    train, valid = split_windows(series)
+    print(f"Treino   : {len(train)} obs | {train.index[0].date()} → {train.index[-1].date()}")
+    print(f"Validação: {len(valid)} obs | {valid.index[0].date()} → {valid.index[-1].date()}")
+    print(f"Holdout ({FIRST_HOLDOUT_TARGET} em diante) não é usado.")
 
-    print(f"\nAjustando ARIMA{ARIMA_ORDER} nos dados de treino...")
+    print("\nComparando especificações (AIC no treino, MAE 1 passo na validação)...")
+    specs = compare_specs(train, valid)
+    print(specs.to_string(index=False))
+    specs.to_csv(OUT_DIR / "spec_comparison.csv", index=False)
+
+    print(f"\nAjustando ARIMA{ARIMA_ORDER} no treino...")
     model = ARIMA(train.values, order=ARIMA_ORDER).fit()
 
-    residuals = np.asarray(model.resid, dtype=float)
-    residual_dates = train.index[len(train) - len(residuals):]
+    # o primeiro residuo de um modelo com d = 1 e' o proprio nivel da serie
+    # (sem valor anterior para diferenciar); fica fora do diagnostico
+    d = ARIMA_ORDER[1]
+    residuals = np.asarray(model.resid, dtype=float)[d:]
+    residual_dates = train.index[d:]
 
     print(f"\nEstatísticas dos resíduos ({len(residuals)} obs):")
     print(f"  Média     : {residuals.mean():.4f}")
     print(f"  Desvio pad: {residuals.std():.4f}")
     print(f"  Min / Max : {residuals.min():.4f} / {residuals.max():.4f}")
     print(f"  AIC treino: {model.aic:.4f}")
-    print(f"  BIC treino: {model.bic:.4f}")
 
     lb_results = run_ljung_box(residuals, LJUNG_BOX_LAGS)
-
     print("\n=== Teste de Ljung-Box (H0: resíduos são ruído branco) ===")
-    print(f"{'Lag':>5}  {'Stat':>10}  {'p-valor':>10}  {'Ruído branco?':>14}")
-    print("-" * 48)
     for r in lb_results:
         verdict = "SIM (p>0.05)" if r["white_noise"] else "NÃO (p≤0.05)"
         print(f"{r['lag']:>5}  {r['lb_stat']:>10.4f}  {r['lb_pvalue']:>10.4f}  {verdict:>14}")
@@ -135,8 +192,11 @@ def main() -> None:
     summary = {
         "arima_order": list(ARIMA_ORDER),
         "data_file": str(DATA_FILE.relative_to(PROJECT_ROOT)),
-        "train_obs": int(len(train)),
-        "holdout_months": HOLDOUT_MONTHS,
+        "train": {"start": str(train.index[0].date()), "end": str(train.index[-1].date()),
+                  "obs": int(len(train))},
+        "validation": {"start": str(valid.index[0].date()), "end": str(valid.index[-1].date()),
+                       "obs": int(len(valid))},
+        "first_holdout_target": FIRST_HOLDOUT_TARGET,
         "aic": round(float(model.aic), 4),
         "bic": round(float(model.bic), 4),
         "residuals_stats": {
@@ -147,15 +207,14 @@ def main() -> None:
             "max": round(float(residuals.max()), 6),
         },
         "ljung_box": lb_results,
+        "spec_comparison": specs.where(specs.notna(), None).to_dict(orient="records"),
     }
-
     out_json = OUT_DIR / "residual_analysis.json"
     out_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"\n  Salvo: residual_analysis.json")
+    print("\n  Salvo: residual_analysis.json, spec_comparison.csv")
 
     print("\nGerando plots...")
     plot_residuals(residuals, residual_dates, OUT_DIR)
-
     print(f"\nAnálise completa. Arquivos em: {OUT_DIR.relative_to(PROJECT_ROOT)}")
 
 

@@ -140,6 +140,11 @@ Regra única: **passado → treino, futuro → teste**. Nunca o contrário.
   pós-choque ≥ 2023).
 - **Sensibilidade (`experiments/arima_sensitivity.py`):** holdout fixo de 24
   meses, variando a janela de treino (36…216 meses).
+- **Ablação (`experiments/ablation.py`):** mesmo walk-forward expansivo do
+  holdout, em 12 e em 60 origens; ver §10.
+- **Diebold-Mariano (`experiments/diebold_mariano.py`):** significância das
+  diferenças de erro entre pares de modelos, no holdout (12) e no walk-forward
+  da análise de choque (216); ver §11.
 k-fold aleatório **não** é usado: quebraria a ordem temporal e vazaria futuro
 para o treino.
 
@@ -391,8 +396,9 @@ em cada uma das 12 origens.
 | Modelo | Protocolo | MAE | RMSE | MAPE (%) | R² |
 |---|---|---|---|---|---|
 | ARIMA(1,1,0) | walk-forward expansivo | **2,895523** | **4,017159** | **2,169427** | **0,367305** |
-| Random Forest | walk-forward expansivo | 3,273438 | 4,647814 | 2,478443 | 0,153058 |
-| XGBoost | walk-forward expansivo | 3,515465 | 4,931411 | 2,676132 | 0,046549 |
+| Random Forest | walk-forward expansivo | 3,268081 | 4,667835 | 2,474877 | 0,145746 |
+| XGBoost | walk-forward expansivo | 3,340820 | 4,844046 | 2,543865 | 0,080032 |
+| Persistência ingênua (referência) | mesmas 12 origens | 2,958251 | 3,979518 | 2,219098 | 0,379107 |
 Para referência, a versão anterior (RF/XGB treinados uma vez) dava RF
 MAE 3,141028 / R² 0,204389 e XGBoost MAE 4,091165 / R² −0,738026. O ranking
 (ARIMA < RF < XGBoost em MAE) não mudou; a conclusão de que o ARIMA tem o
@@ -408,6 +414,171 @@ três modelos apresentados na tabela acima. Também foram conferidas as mesmas
 Portanto, a divergência numérica daquela comparação inicial foi resolvida e
 não permanece como pendência de reprodutibilidade computacional do holdout.
 
+**Reexecução para o artigo final (09/11/2026):** a base foi reconstruída
+(`build_dataset.py --offline`, mesmo SHA-256 `692fc3ce…5e89085`) e todos os
+experimentos foram rodados de novo em um ambiente virtual novo (Python 3.12.6,
+versões fixadas em `requirements.txt`). O ARIMA reproduziu exatamente os
+valores anteriores; Random Forest e XGBoost deram valores ligeiramente
+diferentes dos da tabela publicada antes (RF MAE 3,273438 → 3,268081; XGBoost
+3,515465 → 3,340820). A tabela acima passou a registrar essa execução, que é a
+mesma de onde saem as figuras do artigo final. A ordem dos modelos (ARIMA <
+persistência < RF < XGBoost em MAE) e as conclusões não mudam. A causa da
+variação entre execuções de RF/XGBoost não foi identificada; uma hipótese é o
+paralelismo (`n_jobs=-1`) e diferenças de plataforma/biblioteca nativa — fica
+como pendência de reprodutibilidade bit a bit desses dois modelos. A linha de
+persistência ingênua (previsão de t+1 = preço observado em t, nas mesmas 12
+origens) foi incluída como referência mínima de comparação.
+
 Essa conferência não substitui a verificação científica da proveniência dos
 dados, da disponibilidade temporal das variáveis explicativas e de eventuais
 riscos de vazamento associados às fontes e datas efetivas de publicação.
+
+---
+## 10. Seleção de variáveis e ablação (12/11/2026)
+
+**Objetivo:** identificar as variáveis **efetivamente relevantes** para Random
+Forest e XGBoost e medir a contribuição de cada uma (ablação) — pendência
+registrada desde o TGSI I.
+
+**Etapa 1 — seleção por importância de permutação (`experiments/ablation.py`):**
+- As 54 colunas são agrupadas em **13 variáveis de origem** (`feature_family`):
+  cada exógena com seus lags, média móvel e anomalia (ex.: câmbio = 6 colunas),
+  mais preço corrente R$, preço corrente US$, temperaturas máx./mín. e
+  calendário. A família inteira é permutada com a **mesma** permutação de
+  linhas, para não subestimar variáveis com lags muito correlacionados.
+- Treino: `date` abr/2006 → mar/2019 (156 linhas); validação: abr/2019 →
+  mar/2021 (24 linhas). Essa validação é **anterior a todas as origens
+  avaliadas** na etapa 2 — a seleção não vê o teste.
+- 30 permutações por família (semente 42); **critério a priori:** relevante se
+  `média(ΔMAE) − 2·desvio(ΔMAE) > 0`.
+- Resultado (`results/ablation/importance.csv`):
+  - **Random Forest:** preço R$ (ΔMAE 0,752) e câmbio (0,043).
+  - **XGBoost:** preço R$ (0,780) e calendário (0,008).
+  - Nenhuma variável de clima ou sensoriamento remoto foi selecionada; para a
+    maioria, permutar **reduz** o erro (temperatura mínima, umidade relativa,
+    precipitação, NDVI) — sinal de ajuste a ruído.
+  - MAE de base na validação ≈ 35 R$/saca: o período inclui a alta de
+    2020–2021, fora da faixa de treino (as árvores não extrapolam). A seleção
+    depende dessa janela.
+
+**Etapa 2 — ablação (leave-one-variable-out sobre as relevantes):**
+mesmo walk-forward expansivo de 1 passo do holdout (§3, §9; funções e
+hiperparâmetros importados de `holdout_12m.py`), em **12 origens** (holdout
+oficial) e **60 origens** (alvos mai/2021 → abr/2026). MAE (R$/saca):
+
+| Modelo – configuração (nº colunas) | 12m | 60m |
+|---|---|---|
+| RF – todas (54) | 3,268 | 7,607 |
+| RF – relevantes: preço R$ + câmbio (7) | 3,594 | 7,418 |
+| RF – relevantes sem preço R$ (6) | 11,311 | 18,823 |
+| RF – relevantes sem câmbio (1) | 3,979 | 6,168 |
+| XGB – todas (54) | 3,341 | 9,607 |
+| XGB – relevantes: preço R$ + calendário (5) | 3,142 | 5,963 |
+| XGB – relevantes sem preço R$ (4) | 48,225 | 74,359 |
+| XGB – relevantes sem calendário (1) | 3,542 | 6,276 |
+| *ref.* ARIMA(1,1,0) | 2,896 | 4,450 |
+| *ref.* persistência | 2,958 | 4,771 |
+
+**Leitura:**
+- O preço corrente em R$ domina: removê-lo aumenta o MAE em +154% a +1.435%.
+- Câmbio (RF) e calendário (XGB) têm efeito pequeno e de sinal instável
+  (sem câmbio: +11% em 12m, −17% em 60m).
+- Restringir o XGBoost às relevantes melhora muito o modelo (60m: 9,607 →
+  5,963); no RF o efeito é misto.
+- Nenhuma configuração de árvore supera ARIMA ou persistência nas mesmas
+  janelas.
+
+**Ressalvas:** a seleção depende da janela de validação (que coincide com o
+início do choque); hiperparâmetros fixos; RF/XGBoost têm pequena variação
+numérica entre execuções (§9), irrelevante diante das magnitudes acima.
+
+---
+## 11. Teste de Diebold-Mariano (14/11/2026)
+
+**Objetivo:** verificar se as diferenças de erro entre os modelos são
+estatisticamente significativas (pendência registrada no TGSI I).
+
+**Método (`experiments/diebold_mariano.py`):**
+- `d_t = L(e_A,t) − L(e_B,t)`, perda **absoluta** (principal, coerente com o
+  MAE) e quadrática; horizonte h = 1.
+- Correção para amostras pequenas de Harvey, Leybourne e Newbold (1997):
+  `DM* = DM·sqrt((n + 1 − 2h + h(h−1)/n)/n)`, p-valor bilateral pela t com
+  n − 1 g.l. **DM* < 0 ⇒ o modelo A é mais preciso.**
+- Robustez: a variância de longo prazo do **diferencial de perdas d_t** é
+  reestimada por Newey-West (HAC, núcleo de Bartlett, defasagem
+  L = ⌊4(n/100)^(2/9)⌋: L = 2 no holdout, 4 em 216 e no pré-choque, 3 no choque e
+  no pós-choque). Ela substitui a variância no denominador do DM; mantêm-se a
+  correção HLN e a t com n − 1 g.l. Em todas as amostras e pares, a decisão a 5%
+  é a mesma com as duas variâncias (colunas `dm_hln_nw`, `p_value_nw`).
+- As duas amostras são experimentos distintos: o holdout compara as
+  configurações principais; nas 216 previsões, RF/XGBoost usam as configurações
+  leves da análise de choque (ARIMA e persistência são idênticos nas duas).
+- Nenhuma previsão nova: usa `results/holdout_12m/holdout_12m_predictions.csv`
+  (persistência = preço observado em `date`) e
+  `results/shock_period/shock_period_walkforward.csv` (216 previsões, alvos
+  mai/2008 → abr/2026, com recortes pré-choque/choque/pós-choque).
+- Saídas: `results/diebold_mariano/dm_results.csv` / `.json`.
+- Testes: `tests/test_diebold_mariano.py`.
+
+**Resultados (perda absoluta, DM*, p-valor):**
+
+| Par (A vs. B) | Holdout 12 | Walk-forward 216 |
+|---|---|---|
+| ARIMA vs. persistência | −0,18 (0,863) | −1,63 (0,106) |
+| ARIMA vs. RF | −0,36 (0,723) | −6,08 (< 0,001) |
+| ARIMA vs. XGB | −0,57 (0,581) | −6,14 (< 0,001) |
+| Persistência vs. RF | −0,37 (0,721) | −6,16 (< 0,001) |
+| Persistência vs. XGB | −0,53 (0,605) | −6,02 (< 0,001) |
+| RF vs. XGB | −0,12 (0,906) | −1,48 (0,141) |
+
+**Leitura:**
+- Holdout de 12 meses: nenhuma diferença significativa — a amostra não
+  distingue os modelos.
+- 216 meses: ARIMA e persistência são significativamente mais precisos que
+  RF e XGBoost (robusto a Newey-West e à perda quadrática); ARIMA ×
+  persistência e RF × XGBoost não diferem a 5%.
+- Recortes: o padrão se mantém no pré-choque (n = 140) e no choque (n = 36);
+  no pós-choque (n = 40) ARIMA supera a persistência com p = 0,047 (NW 0,025),
+  que não resiste a Bonferroni (6 pares).
+
+**Ressalva:** no walk-forward de 216 meses, RF e XGBoost usam as
+configurações mais leves da análise de choque (RF 200 árvores/prof. 6; XGB
+200/prof. 3/lr 0,05), não as do holdout.
+
+---
+## 12. Revisão final: escolha do ARIMA sem o holdout (16/11/2026)
+
+**Problema apontado na revisão:** a comparação de especificações do ARIMA
+treinava até abr/2024 e media o MAE em mai/2024 → abr/2026 — janela que
+contém os 12 meses-alvo do holdout (mai/2025 → abr/2026). Além disso, a série
+começava em mar/2006 (mês parcial, excluído da base de modelagem).
+
+**Correção (`experiments/arima_residuals.py`, testada em
+`tests/test_arima_windows.py`):** série a partir de abr/2006; treino
+abr/2006 → abr/2023 (205 obs); validação mai/2023 → abr/2025 (24 meses, 1 passo,
+reajuste mensal); o holdout não é usado. Saída nova: `spec_comparison.csv`.
+
+| Especificação | AIC (treino) | MAE validação |
+|---|---|---|
+| ARIMA(1,1,0) | **1191,79** | 3,875 |
+| ARIMA(0,1,1) | 1192,06 | 3,780 |
+| ARIMA(1,1,1) | 1193,62 | 3,774 |
+| ARIMA(2,1,0) | 1193,70 | 3,760 |
+| ARIMA(2,1,1) | 1195,46 | 3,766 |
+| persistência | – | 4,491 |
+
+Diferenças ≤ 0,115 R$/saca (≈ 3%): ARIMA(1,1,0) mantido por parcimônia.
+
+**Ljung-Box (correção de diagnóstico):** o primeiro resíduo de um modelo com
+d = 1 é o próprio nível da série (≈ 27,8) e inflava a variância, mascarando a
+autocorrelação. Sem ele, p-valores 0,092 / 0,084 / 0,011 / 0,013 (lags
+6/12/18/24): ruído branco não rejeitado no curto prazo, rejeitado nos lags 18
+e 24 — o mesmo vale para as quatro alternativas. A ACF mostra picos isolados
+(≈ 0,2) nos lags 6 e 16. Registrado como limitação no artigo; não afeta a
+avaliação fora da amostra.
+
+**Outros ajustes da revisão:** preço corrente em US$ explicitado como uma das
+54 variáveis (o que foi removido foi o *alvo* em US$ e a conversão pelo câmbio
+realizado); Bonferroni explícito no DM (as 4 diferenças univariados × árvores
+seguem significativas, p corrigido < 0,003 mesmo com Newey-West); referências
+institucionais das fontes de dados; unidade do Abstract.

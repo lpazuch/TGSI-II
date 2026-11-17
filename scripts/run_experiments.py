@@ -12,6 +12,7 @@ Executa, nesta ordem:
   3. Sensibilidade do ARIMA por janela de treino
   4. Correlacao cruzada features x alvo (justificativa das defasagens)
   5. Robustez no periodo de choque 2020-2022 — walk-forward, todos os modelos
+  6. Selecao de variaveis por permutacao + ablacao — RF e XGBoost
 
 Saidas em results/<experimento>/.
 
@@ -30,11 +31,13 @@ EXPERIMENTS_DIR = PROJECT_ROOT / "experiments"
 RESULTS_DIR = PROJECT_ROOT / "results"
 
 EXPERIMENTS = [
-    ("1/5  Holdout final de 12 meses — ARIMA, Random Forest, XGBoost", "holdout_12m.py"),
-    ("2/5  Diagnostico de residuos do ARIMA (Ljung-Box, ACF/PACF)", "arima_residuals.py"),
-    ("3/5  Sensibilidade do ARIMA por janela de treino", "arima_sensitivity.py"),
-    ("4/5  Correlacao cruzada — features x alvo", "cross_correlation.py"),
-    ("5/5  Periodo de choque 2020-2022 — walk-forward, todos os modelos", "shock_period_analysis.py"),
+    ("1/7  Holdout final de 12 meses — ARIMA, Random Forest, XGBoost", "holdout_12m.py"),
+    ("2/7  Diagnostico de residuos do ARIMA (Ljung-Box, ACF/PACF)", "arima_residuals.py"),
+    ("3/7  Sensibilidade do ARIMA por janela de treino", "arima_sensitivity.py"),
+    ("4/7  Correlacao cruzada — features x alvo", "cross_correlation.py"),
+    ("5/7  Periodo de choque 2020-2022 — walk-forward, todos os modelos", "shock_period_analysis.py"),
+    ("6/7  Selecao de variaveis (permutacao) + ablacao — Random Forest e XGBoost", "ablation.py"),
+    ("7/7  Teste de Diebold-Mariano — comparacao de acuracia entre modelos", "diebold_mariano.py"),
 ]
 
 
@@ -69,6 +72,8 @@ def main() -> None:
         ("Sensibilidade ARIMA", "arima_sensitivity"),
         ("Correlacao cruzada", "cross_correlation"),
         ("Periodo de choque", "shock_period"),
+        ("Selecao + ablacao", "ablation"),
+        ("Diebold-Mariano", "diebold_mariano"),
     ]:
         path = RESULTS_DIR / slug
         mark = "OK " if path.exists() else " ? "
