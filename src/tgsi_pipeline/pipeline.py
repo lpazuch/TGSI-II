@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +138,10 @@ def run_pipeline(
     daily_rows = _build_daily_features(config, climate_rows, fx_rows, oil_rows, ndvi_rows, soil_moisture_rows)
     monthly_rows = _build_monthly_features(config, climate_rows, fx_rows, oil_rows, ndvi_rows, soil_moisture_rows)
     monthly_ml_rows = _build_monthly_ml_features(monthly_rows)
-    monthly_ml_target_rows = _attach_monthly_target(monthly_ml_rows, target_monthly_rows)
+    complete_target_rows = _complete_target_months(
+        target_monthly_rows, config.date_range.start, config.date_range.end
+    )
+    monthly_ml_target_rows = _attach_monthly_target(monthly_ml_rows, complete_target_rows)
     monthly_modeling_rows = _build_monthly_modeling_dataset(monthly_ml_target_rows)
 
     daily_path = processed_dir / "features_daily.csv"
@@ -685,6 +689,36 @@ def _build_monthly_modeling_dataset(rows: list[dict[str, Any]]) -> list[dict[str
             current[field_name] = row.get(field_name)
         output.append(current)
     return output
+
+
+def complete_month_bounds(start: date, end: date) -> tuple[str, str]:
+    """Primeiro e ultimo mes (``YYYY-MM-01``) inteiramente cobertos por [start, end].
+
+    A media mensal do CEPEA so' representa o mes inteiro se a extracao cobrir o
+    mes do primeiro ao ultimo dia. Com a planilha exportada em 07/04/2026, abril
+    de 2026 tem apenas os pregoes de 1 a 7 e fica fora; com ``start`` em
+    2006-04-01, o mes parcial de marco de 2006 (serie inicia em 13/03) tambem.
+    """
+    first = start.replace(day=1)
+    if start.day != 1:
+        first = date.fromisoformat(_next_month_start(first.isoformat()))
+    last = end.replace(day=1)
+    if (end + timedelta(days=1)).day != 1:
+        last = (last - timedelta(days=1)).replace(day=1)
+    return first.isoformat(), last.isoformat()
+
+
+def _complete_target_months(
+    target_rows: list[dict[str, Any]],
+    start: date,
+    end: date,
+) -> list[dict[str, Any]]:
+    """Mantem so' os meses de alvo inteiramente cobertos pela janela de extracao."""
+    first, last = complete_month_bounds(start, end)
+    return [
+        row for row in target_rows
+        if first <= parse_date_any(str(row["date"])).isoformat() <= last
+    ]
 
 
 def _next_month_start(date_value: str) -> str:

@@ -48,8 +48,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_FILE = PROJECT_ROOT / "data" / "raw" / "target_soy_cepea_monthly.csv"
 OUT_DIR = PROJECT_ROOT / "results" / "arima_residuals"
 
-SERIES_START = "2006-04-01"        # mar/2006 e' mes parcial (fora, como na base de modelagem)
-FIRST_HOLDOUT_TARGET = "2025-05-01" # primeiro mes-alvo do holdout oficial de 12 meses
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from tgsi_pipeline.config import load_config  # noqa: E402
+from tgsi_pipeline.pipeline import complete_month_bounds  # noqa: E402
+
+# Apenas meses inteiramente cobertos pela extracao (mar/2006 e abr/2026 sao
+# parciais e ficam fora, como na base de modelagem).
+_DATE_RANGE = load_config(PROJECT_ROOT / "configs" / "dataset.hybrid_2006plus.json").date_range
+SERIES_START, SERIES_END = complete_month_bounds(_DATE_RANGE.start, _DATE_RANGE.end)
+HOLDOUT_MONTHS = 12  # holdout oficial: os 12 ultimos meses-alvo da serie
 VALIDATION_MONTHS = 24
 ARIMA_ORDER = (1, 1, 0)
 CANDIDATE_ORDERS = [(1, 1, 0), (0, 1, 1), (1, 1, 1), (2, 1, 0), (2, 1, 1)]
@@ -59,13 +66,13 @@ LJUNG_BOX_LAGS = [6, 12, 18, 24]
 def load_series(path: Path) -> pd.Series:
     df = pd.read_csv(path, parse_dates=["date"])
     df = df.sort_values("date").dropna(subset=["soy_price_brl_bag"]).reset_index(drop=True)
-    df = df[df["date"] >= pd.Timestamp(SERIES_START)]
+    df = df[(df["date"] >= pd.Timestamp(SERIES_START)) & (df["date"] <= pd.Timestamp(SERIES_END))]
     return pd.Series(df["soy_price_brl_bag"].values, index=df["date"], name="soy_price_brl_bag")
 
 
 def split_windows(series: pd.Series) -> tuple[pd.Series, pd.Series]:
     """Treino e validacao, ambos estritamente anteriores ao holdout oficial."""
-    pre = series[series.index < pd.Timestamp(FIRST_HOLDOUT_TARGET)]
+    pre = series.iloc[:-HOLDOUT_MONTHS]
     if len(pre) <= VALIDATION_MONTHS:
         raise ValueError("Serie curta demais antes do holdout.")
     return pre.iloc[:-VALIDATION_MONTHS], pre.iloc[-VALIDATION_MONTHS:]
@@ -161,7 +168,7 @@ def main() -> None:
     train, valid = split_windows(series)
     print(f"Treino   : {len(train)} obs | {train.index[0].date()} → {train.index[-1].date()}")
     print(f"Validação: {len(valid)} obs | {valid.index[0].date()} → {valid.index[-1].date()}")
-    print(f"Holdout ({FIRST_HOLDOUT_TARGET} em diante) não é usado.")
+    print(f"Holdout ({series.index[-HOLDOUT_MONTHS].date()} em diante) não é usado.")
 
     print("\nComparando especificações (AIC no treino, MAE 1 passo na validação)...")
     specs = compare_specs(train, valid)
@@ -196,7 +203,7 @@ def main() -> None:
                   "obs": int(len(train))},
         "validation": {"start": str(valid.index[0].date()), "end": str(valid.index[-1].date()),
                        "obs": int(len(valid))},
-        "first_holdout_target": FIRST_HOLDOUT_TARGET,
+        "first_holdout_target": str(series.index[-HOLDOUT_MONTHS].date()),
         "aic": round(float(model.aic), 4),
         "bic": round(float(model.bic), 4),
         "residuals_stats": {

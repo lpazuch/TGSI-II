@@ -8,8 +8,13 @@ alvo de um mes mais distante no futuro, em vez de ficar em branco.
 from __future__ import annotations
 
 import unittest
+from datetime import date
 
-from tgsi_pipeline.pipeline import _attach_monthly_target
+from tgsi_pipeline.pipeline import (
+    _attach_monthly_target,
+    _complete_target_months,
+    complete_month_bounds,
+)
 
 
 def _feature_row(date: str) -> dict:
@@ -52,6 +57,22 @@ class TargetPairingTests(unittest.TestCase):
         # linha disponivel na serie de alvo.
         self.assertIsNone(jan["soy_price_brl_bag_next_month"])
         self.assertNotEqual(jan.get("soy_price_brl_bag_next_month"), 120.0)
+
+    def test_partial_months_at_both_ends_are_dropped(self) -> None:
+        # Extracao de 2006-04-01 a 2026-04-07: abril/2026 so' tem 1 a 7/4.
+        first, last = complete_month_bounds(date(2006, 4, 1), date(2026, 4, 7))
+        self.assertEqual((first, last), ("2006-04-01", "2026-03-01"))
+        # Inicio no meio do mes descarta esse mes.
+        self.assertEqual(complete_month_bounds(date(2006, 3, 13), date(2026, 3, 31)),
+                         ("2006-04-01", "2026-03-01"))
+
+    def test_incomplete_last_month_is_not_used_as_target(self) -> None:
+        targets = [_target_row("2026-02-01", 126.0), _target_row("2026-03-01", 129.0),
+                   _target_row("2026-04-01", 128.0)]
+        kept = _complete_target_months(targets, date(2006, 4, 1), date(2026, 4, 7))
+        self.assertEqual([r["date"] for r in kept], ["2026-02-01", "2026-03-01"])
+        out = _attach_monthly_target([_feature_row("2026-03-01")], kept)
+        self.assertIsNone(out[0]["soy_price_brl_bag_next_month"])
 
     def test_last_month_of_series_has_no_next_month(self) -> None:
         feature_rows = [_feature_row("2026-04-01")]

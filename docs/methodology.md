@@ -115,13 +115,13 @@ Regra única: **passado → treino, futuro → teste**. Nunca o contrário.
   da série são as 12 **origens de previsão**. ARIMA(1,1,0), Random Forest e
   XGBoost seguem **o mesmo protocolo — walk-forward expansivo de 1 passo**:
   ```
-  para cada origem i (as 12 últimas linhas, date = abr/2025 … mar/2026):
+  para cada origem i (as 12 últimas linhas, date = mar/2025 … fev/2026):
       treina do zero com as linhas [0, i)    (janela expansiva, desde abr/2006)
       prevê a linha i                         (features de date[i] → preço de target_month[i])
       incorpora a linha i e passa à origem seguinte
   ```
-  - O treino da 1ª origem tem 228 linhas (date abr/2006 → mar/2025); o da
-    12ª tem 239. A última linha do treino tem como alvo o preço de `date[i]`,
+  - O treino da 1ª origem tem 227 linhas (date abr/2006 → fev/2025); o da
+    12ª tem 238. A última linha do treino tem como alvo o preço de `date[i]`,
     que já é conhecido na origem — nenhum alvo posterior a `date[i]` entra.
   - Os três modelos passam pela **mesma função** (`run_walk_forward`) com a
     **mesma lista de origens** (`walk_forward_origins`); só muda o
@@ -153,27 +153,36 @@ para o treino.
 | Item | Valor |
 |---|---|
 | Série CEPEA mensal crua (`target_soy_cepea_monthly.csv`) | **mar/2006 → abr/2026 = 242 meses** |
-| mar/2006 | Mês **parcial** — a série diária da CEPEA começa em **13/03/2006** |
-| Janela do config (`date_range.start`) | **2006-04-01** (fixo; a variante 2015+ usa 2015-04-01 — mesmo padrão "1º de abril") |
-| Entrada do dataset final | abr/2006 → mar/2026 (**240 meses**) |
-| Alvo (t+1) | mai/2006 → abr/2026 (**240 valores**) |
-| **Total: 240 observações** | |
-**Por que mar/2006 não aparece:** porque `date_range.start` no config é
-`2006-04-01`. `build_base_rows` só cria linhas mensais a partir dessa data.
-**Não** é efeito de lag nem de janela móvel — essas apenas produzem `NaN` nas
-primeiras linhas, sem removê-las.
+| mar/2006 | Mês **parcial**: a série diária da CEPEA começa em **13/03/2006** |
+| abr/2026 | Mês **parcial**: a planilha foi exportada em **07/04/2026** (`CEPEA_20260407190923.xls`), então a média de abril tem só 4 pregões, de 1 a 7/4 |
+| Janela do config (`date_range`) | **2006-04-01 → 2026-04-07** (data real da extração) |
+| Meses completos usados como preço/alvo | abr/2006 → mar/2026 (**240 meses**) |
+| Entrada do dataset final | abr/2006 → fev/2026 (**239 meses**) |
+| Alvo (t+1) | mai/2006 → mar/2026 (**239 valores**) |
+| **Total: 239 observações** | |
 
-**Contabilidade dos 242 → 240:**
-- −1: mar/2006, anterior ao início configurado;
-- −1: abr/2026, que não tem mês t+1 para formar o alvo
+**Regra (24/11/2026, revisão do orientador, itens 6 e 7):** só entram como
+preço corrente ou alvo os meses **inteiramente cobertos** pela janela de
+extração `[date_range.start, date_range.end]`
+(`tgsi_pipeline.pipeline.complete_month_bounds` / `_complete_target_months`,
+aplicados no modo offline e no online). A regra também vale para os scripts
+que leem a série crua (`arima_residuals.py`, `arima_sensitivity.py`).
+Testes: `tests/test_target_pairing.py` e `tests/test_arima_windows.py`.
+O arquivo cru `target_soy_cepea_monthly.csv` não foi alterado: ele continua
+sendo a agregação fiel da planilha, e o corte acontece no uso.
+
+**Contabilidade dos 242 → 239:**
+- −1: mar/2006, parcial (anterior ao início configurado);
+- −1: abr/2026, parcial (exportação em 07/04/2026); sai como alvo, e por isso
+  mar/2026 fica sem par;
+- −1: mar/2026 como **entrada**, por não ter alvo t+1 completo
   (`_build_monthly_modeling_dataset` descarta linhas sem
   `soy_price_brl_bag_next_month`).
-Isso é coerente com previsão de um passo à frente.
 
-**A verificar / decisão para o texto:** confirmar que a exclusão de mar/2006
-foi deliberada por ser mês incompleto (recomendado: manter a exclusão e
-declará-la explicitamente no TCC). O README do TGSI I mencionava
-`2006-03-01` — desatualizado; os `configs` reais sempre usaram `2006-04-01`.
+**Histórico:** até 23/11/2026 a base tinha 240 pares, com alvos até
+abr/2026. O alvo de abril/2026 era a média parcial de 1 a 7/4 e entrava como
+última previsão do holdout, das 216 origens e da janela de 60 meses. Os
+resultados anteriores a essa data usam essa base antiga.
 
 ---
 ## 5. Modelos
@@ -404,28 +413,20 @@ MAE 3,141028 / R² 0,204389 e XGBoost MAE 4,091165 / R² −0,738026. O ranking
 (ARIMA < RF < XGBoost em MAE) não mudou; a conclusão de que o ARIMA tem o
 menor erro neste holdout continua válida, agora sob protocolo idêntico.
 
-**Conferência independente posterior (13/10/2026):** na comparação inicial,
-mesmo após a correção do protocolo, foram observadas diferenças nos valores de
-Random Forest e XGBoost em relação a uma execução independente. Uma nova
-execução, a partir de um clone do repositório, reproduziu os resultados dos
-três modelos apresentados na tabela acima. Também foram conferidas as mesmas
-12 origens de previsão por modelo, registradas em
-`results/holdout_12m/holdout_12m_origins.csv` (36 procedimentos no total).
-Portanto, a divergência numérica daquela comparação inicial foi resolvida e
-não permanece como pendência de reprodutibilidade computacional do holdout.
+**Conferência independente posterior (13/10/2026):** registro do autor:
+uma nova execução, a partir de um clone do repositório, reproduziu os valores
+da tabela acima, com as mesmas 12 origens por modelo
+(`results/holdout_12m/holdout_12m_origins.csv`). Os logs dessa execução não
+foram preservados.
 
 **Reexecução para o artigo final (09/11/2026):** a base foi reconstruída
 (`build_dataset.py --offline`, mesmo SHA-256 `692fc3ce…5e89085`) e todos os
 experimentos foram rodados de novo em um ambiente virtual novo (Python 3.12.6,
-versões fixadas em `requirements.txt`). O ARIMA reproduziu exatamente os
-valores anteriores; Random Forest e XGBoost deram valores ligeiramente
-diferentes dos da tabela publicada antes (RF MAE 3,273438 → 3,268081; XGBoost
-3,515465 → 3,340820). A tabela acima passou a registrar essa execução, que é a
-mesma de onde saem as figuras do artigo final. A ordem dos modelos (ARIMA <
-persistência < RF < XGBoost em MAE) e as conclusões não mudam. A causa da
-variação entre execuções de RF/XGBoost não foi identificada; uma hipótese é o
-paralelismo (`n_jobs=-1`) e diferenças de plataforma/biblioteca nativa — fica
-como pendência de reprodutibilidade bit a bit desses dois modelos. A linha de
+versões fixadas em `requirements.txt`). As previsões individuais dos três
+modelos são **idênticas** às de 11/10. Os valores 3,273438 (RF) e 3,515465
+(XGBoost), que apareceram nesta tabela entre 24/10 e 16/11, são da execução
+independente do orientador, e não de uma execução do autor. Ver §13.4
+(REV-04). A linha de
 persistência ingênua (previsão de t+1 = preço observado em t, nas mesmas 12
 origens) foi incluída como referência mínima de comparação.
 
@@ -582,3 +583,206 @@ avaliação fora da amostra.
 realizado); Bonferroni explícito no DM (as 4 diferenças univariados × árvores
 seguem significativas, p corrigido < 0,003 mesmo com Newey-West); referências
 institucionais das fontes de dados; unidade do Abstract.
+
+---
+## 13. Verificação de 24/11/2026 — REV-01 a REV-04 (respostas de 25/11/2026)
+
+Os códigos REV-xx seguem o registro de acompanhamento do orientador de
+24/11/2026. Nesta seção, **"origem da previsão"** é o instante em que a
+previsão do mês t+1 é feita. O protocolo usa as variáveis do mês t para prever
+a **média** do preço em t+1; a origem nominal adotada aqui é, portanto, o
+**primeiro dia de t+1**, antes de qualquer pregão de t+1. Nenhum experimento
+foi reexecutado para esta seção. As verificações abaixo são documentais
+(VD), de código (VC) e numéricas sobre arquivos existentes (VN).
+
+### 13.1. REV-01 — Disponibilidade temporal das variáveis explicativas
+
+**Tabela completa (54 linhas):**
+[`docs/verification_evidence/rev01_disponibilidade_54_variaveis.csv`](verification_evidence/rev01_disponibilidade_54_variaveis.csv).
+Resumo por família (as 13 famílias somam as 54 colunas: 4 + 1 + 1 + 1 + 1 +
+6 × 4 + 5 × 2 + 6 × 2):
+
+| Família (nº colunas) | Fonte | Período de referência do valor de t | Quando fica disponível | Na origem (1º dia de t+1) | Revisões posteriores |
+|---|---|---|---|---|---|
+| Calendário (4) | data da linha | mês t | determinístico | sim | não se aplica |
+| Preço R$ (1) | CEPEA, "À vista R$" | média dos pregões de t | diário; publicação no próprio dia **não confirmada** (site do CEPEA bloqueou a consulta automática) | sim, se a publicação diária se confirmar | não documentado |
+| Preço US$ (1) | CEPEA, "À vista US$" (conversão do próprio CEPEA) | idem | idem | idem | não documentado |
+| Câmbio (6) | BCB, PTAX venda | média dos dias úteis de t | diário; horário de divulgação **não confirmado** nesta revisão | sim | não documentado nesta revisão |
+| Brent (6) | EIA, RBRTE | média dos dias de t | a tabela da EIA é atualizada em lote semanal (página consultada em 25/11/2026 indicava próxima atualização em uma semana) | **parcial**: os últimos dias de t podem sair só na semana seguinte | sem nota de revisão na página |
+| Precipitação, temp. média (6 cada) | NASA POWER | soma / média de t | GEOS-IT "generally ready within about two days"; depois sobrescrito por MERRA-2 | **parcial**: faltariam ~2 dias finais de t | **sim**: "any GEOS-IT data are over-written" por MERRA-2, "typically updated every several months" |
+| Temp. máx., temp. mín. (1 cada) | NASA POWER | máx./mín. diário de t | idem | parcial | sim |
+| Umidade relativa, vento (5 cada) | NASA POWER | média de t | idem | parcial | sim |
+| NDVI (6) | MODIS MOD13Q1.061 (AppEEARS) | média das composições de 16 dias **cuja data de início** cai em t | só depois do fim da composição; latência de produção não confirmada | **NÃO** (ver abaixo) | coleção 6.1 é reprocessamento; extensão não confirmada |
+| Umidade do solo (6) | SMAP SPL3SMP_E.006 (AppEEARS) | média das passagens PM de t (~11 dias/mês) | latência média ~1 dia (NSIDC: média de "1 day 05:34:25", tabela de out/2025) | parcial: falta o último ~1 dia | versões novas reprocessam; não confirmado para a v6 |
+
+Defasagens (`_lag_1/2/3`) e média móvel (`_rolling_mean_3`, média de t−1 a
+t−3, **sem** t — `_rolling_mean` em `pipeline.py`) referem-se a meses
+anteriores a t. Para todas as famílias, exceto NDVI, estão disponíveis na
+origem. As anomalias usam o valor de t e herdam a disponibilidade dele.
+
+**Problema identificado — NDVI (exige mudança de código):** a data de cada
+registro do MOD13Q1 no arquivo é o **início** da composição. Todas as 461
+datas caem nos dias 1 + 16k do ano, o calendário de início das composições
+de 16 dias (VN em `data/raw/remote_ndvi_sorriso_mt.csv`). A agregação mensal
+(`_build_monthly_features`, `resample_rows(..., aggregations={"ndvi": "mean"})`)
+atribui cada composição ao mês do início. Com isso, **225 das 461
+composições terminam no mês seguinte**, ou seja, o NDVI do mês t inclui até
+15 dias de t+1, que é o mês-alvo. Isso atinge `ndvi` e `ndvi_month_anomaly`.
+`ndvi_lag_1` e `ndvi_rolling_mean_3` dependem da latência de produção, que
+não foi confirmada. A correção prevista é atribuir cada composição pelo
+**último dia** do período, mais a latência de publicação, e só então agregar.
+Ela muda a base e exige reexecução, que fica para discussão com o orientador
+antes de ser feita.
+
+**Limitações registradas, sem correção nesta etapa:**
+- Brent, NASA POWER e SMAP têm defasagem de dias. Na origem nominal, os
+  últimos dias de t poderiam não estar publicados. A base usa o mês completo.
+- Os dados externos foram obtidos depois do período de referência (ver 13.2),
+  então refletem a **versão disponível na data de download**, e não a que
+  existia na época de cada previsão. Isso vale principalmente para o NASA
+  POWER, cujo trecho GEOS-IT é sobrescrito por MERRA-2.
+- Não foi possível comprovar, por documentação oficial, o horário de
+  divulgação do CEPEA e da PTAX, nem a política de revisão de CEPEA, PTAX e
+  EIA. Esses pontos ficam marcados como **não comprovados**.
+
+Fontes consultadas em 25/11/2026: `power.larc.nasa.gov/docs/methodology/data/sources_meteorology/`;
+`nsidc.org/data/spl3smp_e/versions/6` e
+`nsidc.org/data/user-resources/help-center/what-are-latencies-smap-radiometer-data-sets`;
+`eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=RBRTE&f=D`;
+`earthdata.nasa.gov/data/catalog/lpcloud-mod13q1-061`. As páginas do CEPEA
+(HTTP 403) e do BCB (conteúdo carregado por JavaScript) não puderam ser lidas.
+
+### 13.2. REV-02 — Proveniência e integridade dos dados
+
+**CEPEA (alvo e preço corrente):**
+- **Arquivo original:** `data/raw/CEPEA_20260407190923.xls`, SHA-256
+  `4e0cb593df0f3d29ac23413dd7187f9bba0003b47610e9998df72b1c42f18c40`
+  (conferido em 25/11/2026).
+- **Identificação no próprio arquivo:** aba "Plan 1"; cabeçalho
+  "INDICADOR DA SOJA CEPEA/ESALQ - PARANAGUÁ", "Fonte: Cepea"; colunas
+  `Data`, `À vista R$`, `À vista US$`; 5.003 pregões, de 13/03/2006 a
+  07/04/2026, sem valores ausentes nem datas duplicadas (VN).
+- **Unidade:** o arquivo não traz unidade. A convenção do indicador (R$ e US$
+  por saca de 60 kg, à vista, posto Paranaguá) **precisa ser confirmada na
+  página do CEPEA**, que não pôde ser lida automaticamente.
+- **Obtenção:** exportação manual pela consulta pública do site, em
+  07/04/2026 às 19:09:23 (data embutida no nome do arquivo). Não há API.
+- **Tratamento:** leitura com `xlrd` (`sources/cepea.py`,
+  `ignore_workbook_corruption=True`, porque o `.xls` exportado tem um
+  cabeçalho OLE irregular que o `xlrd` rejeita no modo estrito). A leitura
+  foi conferida contra `target_soy_cepea_daily.csv`: diferença máxima 0,0
+  nas duas colunas.
+- **Agregação:** média aritmética mensal dos pregões (`cepea.resample_monthly`)
+  → `target_soy_cepea_monthly.csv`. Recalculada a partir do `.xls`, a
+  diferença máxima é 0,0 nos 242 meses.
+- **Meses usados:** só os completos (§4). Março/2006 tem 15 pregões a partir
+  de 13/03, e abril/2026 tem 4 pregões, até 07/04. Ambos ficam fora.
+- **Conversões:** nenhuma no pipeline. A coluna US$ é a publicada pelo CEPEA.
+- **Observação de código:** `resample_monthly` trata um preço ausente como 0
+  e o conta na média. Como a série não tem ausentes, isso não afeta a base
+  atual, mas é um defeito latente a corrigir.
+- **Restrição de redistribuição:** **não verificada.** O `.xls` está em um
+  repositório público. Se os termos do CEPEA restringirem a redistribuição,
+  o arquivo deve sair do repositório, e um terceiro deverá reproduzir a
+  exportação manual pela consulta pública do Indicador Soja CEPEA/ESALQ
+  Paranaguá, com período a partir de 13/03/2006, e conferir o hash acima.
+
+**Demais arquivos de `data/raw/`** (SHA-256 conferidos em 25/11/2026):
+
+| Arquivo | SHA-256 | Origem |
+|---|---|---|
+| `climate_combined_sorriso_mt.csv` | `7101a850…250028db` | NASA POWER (100% dos dias) |
+| `climate_nasa_power_sorriso_mt.csv` | `7101a850…250028db` (idêntico ao anterior) | NASA POWER |
+| `economics_brent_daily.csv` | `aa785461…96f03` | EIA RBRTE |
+| `economics_fx_bcb.csv` | `47c2478b…a86b4` | BCB PTAX |
+| `remote_ndvi_sorriso_mt.csv` | `2f4c8828…f6ca` | MOD13Q1.061 / AppEEARS |
+| `remote_soil_moisture_sorriso_mt.csv` | `5453a877…36f6` | SPL3SMP_E.006 / AppEEARS |
+| `target_soy_cepea_daily.csv` | `7be89893…2e` | derivado do `.xls` |
+| `target_soy_cepea_monthly.csv` | `49c27b4f…ea0` | derivado do `.xls` |
+
+**Data de obtenção dos arquivos externos:** não há log de download. Os mesmos
+arquivos, com hashes idênticos, estão na execução original do projeto do
+TGSI I (`pipeline_tgsi/data/run_cepea_hybrid_2006plus_long_remote/raw/`),
+com data de modificação de **21–22/08/2026**, e `run_report.json` sem avisos
+nem erros. A data de download é, portanto, **provavelmente** 21–22/08/2026,
+não comprovada. A janela pedida às fontes foi 2006-04-01 → 2026-04-07.
+
+### 13.3. REV-03 — Umidade do solo
+
+- **Disponibilidade original:** o SPL3SMP_E v6 começa em 31/03/2015 (NSIDC).
+  O arquivo tem 1.413 registros diários, de 31/03/2015 a 06/04/2026, todos da
+  passagem PM e sem valores ausentes. Todos os meses de mar/2015 a abr/2026
+  têm ao menos um registro. Há em média 11 dias por mês (mínimo 1 em
+  mar/2015, 2 em ago/2022 e 3 em set/2022 e jul/2019), por causa da órbita.
+- **Na base mensal:** as 107 linhas de abr/2006 a fev/2015 não têm umidade do
+  solo, nem as defasagens e a média móvel correspondentes. A anomalia só
+  existe a partir do segundo ano de cada mês-calendário.
+- **Tratamento:** não há interpolação, preenchimento a partir de outra fonte
+  nem imputação na construção da base: os valores ficam ausentes em
+  `features_monthly_modeling.csv`. A imputação acontece só nos experimentos,
+  dentro de um `Pipeline` do scikit-learn com `SimpleImputer(strategy="median")`
+  ajustado **apenas no treino de cada origem** (`experiments/holdout_12m.py:119`;
+  `experiments/shock_period_analysis.py:109`; `experiments/ablation.py` usa o
+  forecaster de `holdout_12m.py`).
+- **Holdout (12 origens) e ablação (12 e 60 origens):** todo treino inclui
+  meses de 2015 em diante. Os meses anteriores recebem a mediana dos valores
+  de umidade do solo **do próprio treino**, que são todos anteriores à
+  origem. Não há uso de informação futura, mas 107 meses recebem um valor
+  constante.
+- **Walk-forward da análise de choque:** nas origens cujo treino termina
+  antes de mar/2015 (as ~84 primeiras), a coluna está inteiramente vazia no
+  treino. O `SimpleImputer` do scikit-learn 1.8, com o padrão
+  `keep_empty_features=False`, **descarta** essas colunas. Nessas origens, os
+  modelos de árvore usam 48 colunas, não 54. O texto do artigo que fala em
+  "mesmo conjunto de 54 variáveis" nessa análise precisa ser corrigido.
+- **Informação futura:** nenhuma etapa usa valores posteriores à origem. A
+  mediana é ajustada no treino. As defasagens, a média móvel e a anomalia são
+  causais (`_build_monthly_ml_features`, `_causal_month_normal`).
+
+### 13.4. REV-04 — Divergências numéricas entre execuções
+
+**O que os registros mostram (VN):**
+
+| Execução | Base (SHA-256) | RF MAE | XGB MAE | Origem do registro |
+|---|---|---|---|---|
+| 11/10/2026 (autor) | `692fc3ce…5e89085` | 3,268081 | 3,340820 | `docs/verification_evidence/rev04/2026-10-11_*` (cópia de `results/` da worktree do item 18) |
+| Execução independente do orientador (out/2026) | não registrado aqui | 3,273438 | 3,515465 | citada em `methodology.md` no commit `2ac453a` (11/10) |
+| 09/11/2026 (autor) | `692fc3ce…5e89085` | 3,268081 | 3,340820 | `docs/verification_evidence/rev04/2026-11-09_*` (cópia de `results/` do checkout principal) |
+| 24/11/2026 (autor, base nova sem abr/2026) | `596fba0f…` | — | — | 11 previsões em comum com 09/11 |
+
+- As previsões individuais de 11/10 e de 09/11 são **idênticas** nos 12 meses
+  e nos três modelos. A diferença máxima é 0,0 no ARIMA e no XGBoost e
+  2,8×10⁻¹⁴ no RF, nível de arredondamento de ponto flutuante.
+- Na execução de 24/11, com a base nova, as 11 previsões dos meses-alvo em
+  comum (mai/2025 a mar/2026) também são idênticas às de 09/11 (mesma
+  tolerância). Para esses meses, o treino de cada origem é o mesmo.
+- Todas as execuções do autor usaram Python 3.12.6, numpy 2.4.4, pandas
+  3.0.2, scikit-learn 1.8.0, scipy 1.17.1, statsmodels 0.14.6 e xgboost
+  3.2.0, em macOS (Darwin arm64). Os hiperparâmetros e a semente
+  (`random_state=42`) não mudaram entre 11/10 e 09/11 (código de
+  `holdout_12m.py` sem alteração nesses parâmetros). A ordem das colunas vem
+  da lista fixa de features e a ordem das linhas é por `date`.
+
+**Origem da confusão de números na documentação:** o commit `4aff63c`
+(24/10/2026, "Ajuste das métricas de performance dos modelos") trocou na
+tabela da §9 os valores do autor (3,268081 e 3,340820) pelos da execução
+independente (3,273438 e 3,515465). O commit `9d41e63` (03/11) manteve essa
+troca, e o `cdbf2b6` (16/11) voltou aos valores do autor. Por isso, a
+redação anterior da §9, que falava em diferença "entre execuções" do autor,
+estava **incorreta**: as execuções do autor são reproduzíveis entre si, e a
+divergência é entre o ambiente do autor e o da execução independente.
+
+**Causa:** **não determinada.** Não há, neste repositório, as previsões
+individuais nem a descrição do ambiente da execução independente. Sem elas,
+não é possível dizer se a diferença vem da base, das versões de bibliotecas,
+da plataforma ou do procedimento. A hipótese de paralelismo (`n_jobs=-1`),
+registrada antes, **não é sustentada**: no ambiente do autor, o resultado é
+bit a bit idêntico entre execuções com o mesmo `n_jobs`. Para fechar o item,
+são necessárias as previsões por origem da execução independente e o
+ambiente usado (Python, bibliotecas, sistema operacional e arquitetura).
+
+**Efeito nas conclusões:** nas duas versões, ARIMA e persistência ficam
+abaixo de RF e XGBoost no holdout, e nenhuma diferença do holdout é
+estatisticamente significativa (§11). A divergência não altera as
+conclusões, mas a reprodutibilidade numérica de RF e XGBoost **entre
+ambientes** continua como limitação.

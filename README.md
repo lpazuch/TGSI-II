@@ -25,13 +25,17 @@ Unidade analítica: mês. Escopo geográfico: indicador de praça de referência
 | NDVI | NASA MODIS `MOD13Q1.061` via AppEEARS | `ndvi` |
 | Umidade do solo | NASA SMAP `SPL3SMP_E.006` via AppEEARS (desde 2015) | `soil_moisture_m3m3` |
 Ponto geográfico: Sorriso–MT (−12,5425 / −55,7211).
-Na base final, os **240 pares mensais** correspondem a entradas de **abr/2006 a mar/2026** (`date`) e a alvos de **mai/2006 a abr/2026** (`target_month`).
+Na base final, os **239 pares mensais** correspondem a entradas de **abr/2006 a fev/2026** (`date`) e a alvos de **mai/2006 a mar/2026** (`target_month`). Os meses parciais (mar/2006, cuja série diária começa em 13/03, e abr/2026, porque a planilha foi exportada em 07/04/2026) ficam fora; ver `docs/methodology.md` §4.
 Detalhes de origem, frequência, transformação e unidade de cada variável:
 **[`docs/data_sources.md`](docs/data_sources.md)**.
 > **Os dados de entrada são versionados** em `data/raw/` (CSVs + a planilha
 > `CEPEA_20260407190923.xls`, hash SHA-256 registrado em
 > [`docs/data_sources.md`](docs/data_sources.md)) — é o que permite `git clone`
 > → `build_dataset.py --offline` funcionar sem rede nem credenciais.
+> Proveniência completa (fonte, data de obtenção, unidade, agregação, hashes
+> de todos os arquivos, restrições não verificadas) e disponibilidade temporal
+> de cada uma das 54 variáveis: `docs/methodology.md` §13 (REV-01 a REV-04) e
+> `docs/verification_evidence/`.
 > `data/interim/` e `data/processed/` são **gerados** pelo pipeline e não são
 > versionados (regenerados a cada execução).
 ## Pipeline — como a base é construída
@@ -170,7 +174,7 @@ tgsi-ii/
 |---|---|---|
 | 1 | Anomalias mensais **causais** (normal só com passado) — elimina look-ahead | `src/tgsi_pipeline/pipeline.py`, `tests/test_no_leakage.py`, `docs/methodology.md` §2 |
 | 2 | Removida a modelagem em USD e a conversão USD→BRL com câmbio realizado; alvo oficial é **só BRL** | `experiments/holdout_12m.py`, `docs/methodology.md` §1.1 |
-| 3 | Período e "observações perdidas" (mar/2006, abr/2026) documentados | `docs/methodology.md` §4 |
+| 3 | Período e "observações perdidas" (mar/2006 e abr/2026, meses parciais) documentados; só meses completos entram como alvo | `docs/methodology.md` §4, `tests/test_target_pairing.py` |
 | 4 | Origem/transformação de cada fonte consolidada | `docs/data_sources.md` |
 | 5 | `requirements.txt` com versões explícitas | `requirements.txt`, `pyproject.toml` |
 | 6 | Base reproduzível a partir dos dados de entrada (modo offline) | `scripts/build_dataset.py` |

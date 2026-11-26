@@ -6,6 +6,9 @@ Documentação da origem e das transformações de cada variável usada na base
 Base geográfica: ponto único **Sorriso, MT** (lat −12,5425 / lon −55,7211),
 estação INMET de referência **A904**. Janela de coleta configurada:
 **2006-04-01 → 2026-04-07** (`configs/dataset.hybrid_2006plus.json`).
+Só os meses inteiramente cobertos por essa janela entram como preço ou alvo
+(abr/2006 → mar/2026); abr/2026, com dados só até 07/04, fica fora
+(`docs/methodology.md` §4).
 
 Legenda: *(a verificar)* = não determinável só pelo código/arquivos atuais;
 precisa ser confirmado antes da escrita final do TCC.
@@ -21,11 +24,23 @@ precisa ser confirmado antes da escrita final do TCC.
 > - **Nome esperado:** `CEPEA_20260407190923.xls`;
 > - **SHA-256:** `4e0cb593df0f3d29ac23413dd7187f9bba0003b47610e9998df72b1c42f18c40`.
 >
+> - **Conteúdo conferido (25/11/2026):** aba "Plan 1", cabeçalho "INDICADOR DA
+>   SOJA CEPEA/ESALQ - PARANAGUÁ" / "Fonte: Cepea", colunas `Data`,
+>   `À vista R$`, `À vista US$`; 5.003 pregões de 13/03/2006 a 07/04/2026.
+> - **Redistribuição:** termos de uso do CEPEA **não verificados**. Se houver
+>   restrição, o `.xls` deve sair do repositório público e ser obtido pela
+>   consulta pública (ver `methodology.md` §13.2).
+>
 > Os demais arquivos de `data/raw/` (câmbio, Brent, clima, NDVI, umidade do
 > solo, alvo diário/mensal) foram gerados pelo próprio pipeline
 > (`tgsi_pipeline.pipeline.run_pipeline`, modo `--online`) na janela
 > 2006-04-01 → 2026-04-07, a partir das fontes descritas abaixo — não são
 > download manual, são reprodutíveis via `scripts/build_dataset.py --online`.
+> Data de obtenção provável: **21–22/08/2026** (data de modificação dos mesmos
+> arquivos, com hashes idênticos, na execução original em `pipeline_tgsi`; não
+> há log de download). Uma nova coleta online traria a versão vigente das
+> fontes, que pode diferir (ex.: NASA POWER sobrescreve GEOS-IT por MERRA-2).
+> Hashes de todos os arquivos: `methodology.md` §13.2.
 
 ---
 
@@ -36,7 +51,7 @@ precisa ser confirmado antes da escrita final do TCC.
 | Origem | CEPEA (Centro de Estudos Avançados em Economia Aplicada) / ESALQ-USP — Indicador da Soja, praça **Paranaguá** |
 | Referência | Planilha `.xls` exportada manualmente do site do CEPEA (`data/raw/CEPEA_20260407190923.xls`; download em **07/04/2026**). Página: consulta pública do Indicador Soja CEPEA/ESALQ Paranaguá |
 | Variáveis | `À vista R$` → `soy_price_brl_bag` · `À vista US$` → `soy_price_usd_bag` |
-| Unidade | R$ (e US$) por **saca de 60 kg** |
+| Unidade | R$ (e US$) por **saca de 60 kg** (convenção do indicador; o `.xls` exportado não traz a unidade, a confirmar na página do CEPEA) |
 | Frequência original | Diária (dias úteis). Série começa em **13/03/2006** e vai até 07/04/2026 |
 | Transformação | Parse do `.xls` (`xlrd`) → série diária (`target_soy_cepea_daily.csv`) |
 | Agregação | **Média aritmética mensal** dos dias com cotação (`cepea.resample_monthly`) → `target_soy_cepea_monthly.csv` |
@@ -89,9 +104,9 @@ precisa ser confirmado antes da escrita final do TCC.
 | Origem | **NASA LP DAAC** via **AppEEARS** (autenticação NASA Earthdata) — produto **MOD13Q1.061** (MODIS/Terra Vegetation Indices, composição de 16 dias, 250 m) |
 | Referência | `appeears.earthdatacloud.nasa.gov/api` — extração `point` no ponto de Sorriso; layer escolhida automaticamente (prioridade `NDVI` / `_250m_16_days_NDVI`) |
 | Variável / unidade | `ndvi` — adimensional, −1 a 1 (fator de escala aplicado se o CSV vier em inteiros) |
-| Frequência original | Composição de 16 dias |
+| Frequência original | Composição de 16 dias. A data de cada registro é o **início** da composição (todas as 461 datas caem nos dias 1 + 16k do ano) |
 | Período | MODIS desde 2000; nesta run, alinhado à janela até 2026-04 |
-| Agregação | Valor do ponto → **média mensal** |
+| Agregação | Valor do ponto → **média mensal** das composições cuja data de início cai no mês. **Problema (REV-01):** 225 das 461 composições terminam no mês seguinte, então o NDVI de t inclui dias de t+1 (`methodology.md` §13.1) |
 | Layer usada nesta run | **`_250m_16_days_NDVI`** do produto `MOD13Q1.061` (461/461 linhas com `ndvi_source=AppEEARS:MOD13Q1.061:_250m_16_days_NDVI`, verificado em `data/raw/remote_ndvi_sorriso_mt.csv`) |
 
 ## 6. Umidade do solo
@@ -101,8 +116,8 @@ precisa ser confirmado antes da escrita final do TCC.
 | Origem | **NASA NSIDC DAAC** via **AppEEARS** — produto **SPL3SMP_E.006** (SMAP Enhanced L3 Radiometer Global Daily 9 km Soil Moisture) |
 | Referência | `appeears.earthdatacloud.nasa.gov/api` — layers `soil_moisture_am` / `soil_moisture_pm` (média das disponíveis) |
 | Variável / unidade | `soil_moisture_m3m3` — m³/m³ |
-| Frequência original | Diária (composições AM/PM) |
-| Período | **A partir de 2015** (missão SMAP lançada em jan/2015). No dataset final há valores só a partir de ~fev/2015 → as ~107 primeiras linhas ficam sem umidade do solo. **Limitação conhecida, não é erro** |
+| Frequência original | Diária, mas só a passagem PM foi usada; por causa da órbita, há em média ~11 dias com dado por mês |
+| Período | Produto a partir de **31/03/2015**; arquivo de 31/03/2015 a 06/04/2026, sem ausentes. No dataset final há valores a partir de **mar/2015**, então as **107** primeiras linhas (abr/2006 a fev/2015) ficam sem umidade do solo. Tratamento nos experimentos: `methodology.md` §13.3 |
 | Agregação | **Média mensal** |
 | Layer usada nesta run | **`Soil_Moisture_Retrieval_Data_PM_soil_moisture_pm`** do produto `SPL3SMP_E.006` (1413/1413 linhas com `soil_moisture_source=AppEEARS:SPL3SMP_E.006:Soil_Moisture_Retrieval_Data_PM_soil_moisture_pm`, verificado em `data/raw/remote_soil_moisture_sorriso_mt.csv`) — só a passagem **PM**; a passagem AM não foi retornada/selecionada nesta coleta |
 

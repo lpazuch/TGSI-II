@@ -33,6 +33,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_FILE = PROJECT_ROOT / "data" / "raw" / "target_soy_cepea_monthly.csv"
 OUT_DIR = PROJECT_ROOT / "results" / "arima_sensitivity"
 
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+from tgsi_pipeline.config import load_config  # noqa: E402
+from tgsi_pipeline.pipeline import complete_month_bounds  # noqa: E402
+
+# Apenas meses inteiramente cobertos pela extracao: mar/2006 (serie inicia em
+# 13/03) e abr/2026 (exportacao em 07/04) sao parciais e ficam fora.
+_DATE_RANGE = load_config(PROJECT_ROOT / "configs" / "dataset.hybrid_2006plus.json").date_range
+SERIES_START, SERIES_END = complete_month_bounds(_DATE_RANGE.start, _DATE_RANGE.end)
+
 HOLDOUT_MONTHS = 24
 ARIMA_ORDER = (1, 1, 0)
 WINDOW_SIZES = [36, 48, 60, 72, 84, 96, 120, 144, 180, 216]
@@ -41,6 +50,7 @@ WINDOW_SIZES = [36, 48, 60, 72, 84, 96, 120, 144, 180, 216]
 def load_series(path: Path) -> pd.Series:
     df = pd.read_csv(path, parse_dates=["date"])
     df = df.sort_values("date").dropna(subset=["soy_price_brl_bag"]).reset_index(drop=True)
+    df = df[(df["date"] >= pd.Timestamp(SERIES_START)) & (df["date"] <= pd.Timestamp(SERIES_END))]
     return pd.Series(df["soy_price_brl_bag"].values, index=df["date"], name="soy_price_brl_bag")
 
 

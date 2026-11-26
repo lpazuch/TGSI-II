@@ -49,6 +49,7 @@ from tgsi_pipeline.pipeline import (
     _build_monthly_features,
     _build_monthly_ml_features,
     _build_monthly_modeling_dataset,
+    _complete_target_months,
     run_pipeline,
 )
 from tgsi_pipeline.utils import parse_float
@@ -118,7 +119,9 @@ def build_offline(config_path: Path) -> Path:
     if missing:
         print(f"[aviso] entradas ausentes (seguindo sem elas): {missing}")
 
-    target_monthly = _load_rows_target()
+    target_monthly = _complete_target_months(
+        _load_rows_target(), config.date_range.start, config.date_range.end
+    )
 
     print("Integrando fontes e agregando por mes...")
     daily_rows = _build_daily_features(
