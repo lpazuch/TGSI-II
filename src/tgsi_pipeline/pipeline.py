@@ -7,6 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+from .availability import RULES, shift_to_availability
 from .csv_io import write_csv
 from .models import ProjectConfig
 from .sources import bcb, cepea, eia, inmet, nasa_power, remote_sensing, world_bank
@@ -315,6 +316,32 @@ def _build_monthly_features(
     soil_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     base_rows = build_base_rows(config.date_range, config.locations, "monthly")
+
+    # REV-01: cada observacao entra no mes em que fica DISPONIVEL, nao no mes
+    # em que foi medida. Ver tgsi_pipeline/availability.py.
+    start = config.date_range.start
+    climate_rows = shift_to_availability(
+        climate_rows, RULES["climate"], extraction_start=start, require_full_window=True
+    )
+    fx_rows = shift_to_availability(
+        fx_rows, RULES["fx"], extraction_start=start, require_full_window=True
+    )
+    if oil_rows and str(oil_rows[0].get("oil_frequency")) != "monthly":
+        oil_rows = shift_to_availability(
+            oil_rows, RULES["oil"], extraction_start=start, require_full_window=True
+        )
+    elif oil_rows:
+        # Media mensal do Banco Mundial (fallback): sai so' no inicio do mes
+        # seguinte, portanto a linha de t usa a media de t-1.
+        oil_rows = [
+            {**row, "date": _next_month_start(str(row["date"]))} for row in oil_rows
+        ]
+    ndvi_rows = shift_to_availability(
+        ndvi_rows, RULES["ndvi"], extraction_start=start, require_full_window=False
+    )
+    soil_rows = shift_to_availability(
+        soil_rows, RULES["soil_moisture"], extraction_start=start, require_full_window=True
+    )
 
     if climate_rows:
         monthly_climate = resample_rows(

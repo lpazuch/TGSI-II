@@ -33,9 +33,16 @@ Detalhes de origem, frequência, transformação e unidade de cada variável:
 > [`docs/data_sources.md`](docs/data_sources.md)) — é o que permite `git clone`
 > → `build_dataset.py --offline` funcionar sem rede nem credenciais.
 > Proveniência completa (fonte, data de obtenção, unidade, agregação, hashes
-> de todos os arquivos, restrições não verificadas) e disponibilidade temporal
+> de todos os arquivos, licença do CEPEA) e disponibilidade temporal
 > de cada uma das 54 variáveis: `docs/methodology.md` §13 (REV-01 a REV-04) e
 > `docs/verification_evidence/`.
+> **Regra de disponibilidade (26/11/2026):** a linha do mês t só contém
+> dados publicados até o fim de t (NDVI pelo fim da composição + 16 dias;
+> Brent + 10 dias; NASA POWER e SMAP + 3 dias). Ver
+> `src/tgsi_pipeline/availability.py` e `docs/methodology.md` §14. Os
+> resultados descritos abaixo ainda são os da base anterior a essa correção.
+> Os dados do CEPEA são licenciados sob **CC BY-NC 4.0** (atribuição, uso não
+> comercial): ver [`data/raw/LICENSE-CEPEA.md`](data/raw/LICENSE-CEPEA.md).
 > `data/interim/` e `data/processed/` são **gerados** pelo pipeline e não são
 > versionados (regenerados a cada execução).
 ## Pipeline — como a base é construída
@@ -93,9 +100,11 @@ colunas de anomalia (que foram corrigidas — ver abaixo).
   expansivo do holdout, em 12 e 60 origens. Ver `docs/methodology.md` §10.
 - **Teste de Diebold-Mariano (`experiments/diebold_mariano.py`):** correção
   HLN, perda absoluta. No holdout de 12 meses nenhuma diferença é
-  significativa; nas 216 previsões do walk-forward, ARIMA e persistência são
-  significativamente mais precisos que RF/XGBoost (p < 0,001) e empatados entre
-  si (p = 0,11). Ver `docs/methodology.md` §11.
+  significativa, o que **não** demonstra equivalência entre os modelos (REV-07);
+  nas 216 previsões do walk-forward (215 após a exclusão de abr/2026), ARIMA e
+  persistência são significativamente mais precisos que RF/XGBoost (p < 0,001),
+  sem diferença significativa entre si (p = 0,11). Ver `docs/methodology.md`
+  §11 e §14.7.
 Regra: **passado → treino, futuro → teste**. Sem k-fold aleatório.
 Transformações que aprendem parâmetros (imputação, anomalias) respeitam a
 ordem temporal. Detalhes: **[`docs/methodology.md`](docs/methodology.md)**.

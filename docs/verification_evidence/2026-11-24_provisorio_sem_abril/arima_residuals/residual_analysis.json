@@ -1,0 +1,86 @@
+{
+  "arima_order": [
+    1,
+    1,
+    0
+  ],
+  "data_file": "data/raw/target_soy_cepea_monthly.csv",
+  "train": {
+    "start": "2006-04-01",
+    "end": "2023-03-01",
+    "obs": 204
+  },
+  "validation": {
+    "start": "2023-04-01",
+    "end": "2025-03-01",
+    "obs": 24
+  },
+  "first_holdout_target": "2025-04-01",
+  "aic": 1176.9984,
+  "bic": 1183.6248,
+  "residuals_stats": {
+    "n": 203,
+    "mean": 0.47405,
+    "std": 4.323602,
+    "min": -14.463656,
+    "max": 18.621366
+  },
+  "ljung_box": [
+    {
+      "lag": 6,
+      "lb_stat": 10.915638,
+      "lb_pvalue": 0.091019,
+      "white_noise": true
+    },
+    {
+      "lag": 12,
+      "lb_stat": 22.150793,
+      "lb_pvalue": 0.035864,
+      "white_noise": false
+    },
+    {
+      "lag": 18,
+      "lb_stat": 39.288134,
+      "lb_pvalue": 0.002606,
+      "white_noise": false
+    },
+    {
+      "lag": 24,
+      "lb_stat": 43.795311,
+      "lb_pvalue": 0.008059,
+      "white_noise": false
+    }
+  ],
+  "spec_comparison": [
+    {
+      "order": "ARIMA(1, 1, 0)",
+      "aic_train": 1177.0,
+      "mae_valid": 4.437
+    },
+    {
+      "order": "ARIMA(0, 1, 1)",
+      "aic_train": 1176.87,
+      "mae_valid": 4.356
+    },
+    {
+      "order": "ARIMA(1, 1, 1)",
+      "aic_train": 1178.73,
+      "mae_valid": 4.345
+    },
+    {
+      "order": "ARIMA(2, 1, 0)",
+      "aic_train": 1178.84,
+      "mae_valid": 4.335
+    },
+    {
+      "order": "ARIMA(2, 1, 1)",
+      "aic_train": 1180.61,
+      "mae_valid": 4.339
+    },
+    {
+      "order": "persistencia",
+      "aic_train": NaN,
+      "mae_valid": 5.145
+    }
+  ]
+}

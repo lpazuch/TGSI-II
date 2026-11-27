@@ -52,33 +52,39 @@ def fetch_soybean_prices_from_xls(
 
 
 def resample_monthly(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    buckets: dict[str, dict[str, Any]] = {}
-    counts: dict[str, int] = {}
+    """Media aritmetica mensal dos pregoes.
+
+    Cada preco (R$ e US$) tem seu proprio contador: um pregao com valor
+    ausente e' ignorado na media daquela coluna, em vez de entrar como 0
+    (REV-02). Um mes sem nenhum valor valido fica com None.
+    """
+    fields = ("soy_price_brl_bag", "soy_price_usd_bag")
+    meta: dict[str, dict[str, Any]] = {}
+    values: dict[str, dict[str, list[float]]] = {}
     for row in rows:
         month = str(row["date"])[:7] + "-01"
-        bucket = buckets.setdefault(
+        meta.setdefault(
             month,
             {
-                "date": month,
-                "soy_price_brl_bag": 0.0,
-                "soy_price_usd_bag": 0.0,
                 "target_source": row.get("target_source"),
                 "target_series_name": row.get("target_series_name"),
-                "target_frequency": "monthly",
             },
         )
-        bucket["soy_price_brl_bag"] += float(row.get("soy_price_brl_bag") or 0.0)
-        bucket["soy_price_usd_bag"] += float(row.get("soy_price_usd_bag") or 0.0)
-        counts[month] = counts.get(month, 0) + 1
+        bucket = values.setdefault(month, {field: [] for field in fields})
+        for field in fields:
+            value = _as_float(row.get(field))
+            if value is not None:
+                bucket[field].append(value)
 
     output: list[dict[str, Any]] = []
-    for month in sorted(buckets):
-        bucket = dict(buckets[month])
-        count = counts[month]
-        if count:
-            bucket["soy_price_brl_bag"] = round(bucket["soy_price_brl_bag"] / count, 6)
-            bucket["soy_price_usd_bag"] = round(bucket["soy_price_usd_bag"] / count, 6)
-        output.append(bucket)
+    for month in sorted(values):
+        out: dict[str, Any] = {"date": month}
+        for field in fields:
+            series = values[month][field]
+            out[field] = round(sum(series) / len(series), 6) if series else None
+        out.update(meta[month])
+        out["target_frequency"] = "monthly"
+        output.append(out)
     return output
 
 

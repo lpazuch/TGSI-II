@@ -1,0 +1,9 @@
+feature,label,n_obs,best_lag,best_corr,conf_95,significant
+usd_brl,Câmbio USD/BRL,239,5,0.9144,0.126782,True
+ndvi,NDVI,239,0,-0.447908,0.126782,True
+temperature_mean_c,Temperatura média (°C),239,12,0.199146,0.126782,True
+soil_moisture_m3m3,Umidade do solo (m³/m³),132,2,-0.195965,0.170596,True
+brent_usd_bbl,Petróleo Brent (USD/bbl),239,12,-0.16217,0.126782,True
+relative_humidity_pct,Umidade relativa (%),239,12,-0.119047,0.126782,False
+precipitation_mm,Precipitação (mm),239,3,-0.088198,0.126782,False
+wind_speed_ms,Velocidade do vento (m/s),239,12,0.027089,0.126782,False

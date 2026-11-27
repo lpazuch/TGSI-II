@@ -620,7 +620,7 @@ t−3, **sem** t — `_rolling_mean` em `pipeline.py`) referem-se a meses
 anteriores a t. Para todas as famílias, exceto NDVI, estão disponíveis na
 origem. As anomalias usam o valor de t e herdam a disponibilidade dele.
 
-**Problema identificado — NDVI (exige mudança de código):** a data de cada
+**Problema identificado — NDVI (exige mudança de código; corrigido em 26/11/2026, ver §14.1):** a data de cada
 registro do MOD13Q1 no arquivo é o **início** da composição. Todas as 461
 datas caem nos dias 1 + 16k do ano, o calendário de início das composições
 de 16 dias (VN em `data/raw/remote_ndvi_sorriso_mt.csv`). A agregação mensal
@@ -634,7 +634,7 @@ não foi confirmada. A correção prevista é atribuir cada composição pelo
 Ela muda a base e exige reexecução, que fica para discussão com o orientador
 antes de ser feita.
 
-**Limitações registradas, sem correção nesta etapa:**
+**Limitações registradas em 25/11** (Brent, NASA POWER e SMAP corrigidos em 26/11/2026, §14.1; a limitação das versões consolidadas continua):
 - Brent, NASA POWER e SMAP têm defasagem de dias. Na origem nominal, os
   últimos dias de t poderiam não estar publicados. A base usa o mês completo.
 - Os dados externos foram obtidos depois do período de referência (ver 13.2),
@@ -680,12 +680,23 @@ Fontes consultadas em 25/11/2026: `power.larc.nasa.gov/docs/methodology/data/sou
 - **Conversões:** nenhuma no pipeline. A coluna US$ é a publicada pelo CEPEA.
 - **Observação de código:** `resample_monthly` trata um preço ausente como 0
   e o conta na média. Como a série não tem ausentes, isso não afeta a base
-  atual, mas é um defeito latente a corrigir.
-- **Restrição de redistribuição:** **não verificada.** O `.xls` está em um
-  repositório público. Se os termos do CEPEA restringirem a redistribuição,
-  o arquivo deve sair do repositório, e um terceiro deverá reproduzir a
-  exportação manual pela consulta pública do Indicador Soja CEPEA/ESALQ
-  Paranaguá, com período a partir de 13/03/2006, e conferir o hash acima.
+  atual, mas é um defeito latente a corrigir (**corrigido em 26/11/2026, §14.2**).
+- **Licença e redistribuição:** os dados do CEPEA são licenciados sob
+  **Creative Commons Atribuição-NãoComercial 4.0 Internacional (CC BY-NC
+  4.0)**, conforme a página "Licença de uso de dados" do CEPEA
+  (`cepea.org.br/br/licenca-de-uso-de-dados.aspx`, consultada em 26/11/2026). A licença permite redistribuir o `.xls` e os arquivos derivados
+  num repositório acadêmico público, desde que:
+  - haja atribuição ao CEPEA/ESALQ-USP;
+  - a licença seja indicada;
+  - as modificações sejam informadas;
+  - o uso não seja comercial.
+
+  As condições e a lista de arquivos cobertos estão em
+  [`data/raw/LICENSE-CEPEA.md`](../data/raw/LICENSE-CEPEA.md). Um terceiro
+  também pode obter a mesma série pela consulta pública do Indicador Soja
+  CEPEA/ESALQ Paranaguá, com período a partir de 13/03/2006, e conferir o hash
+  acima. Uma exportação feita em outra data incluirá pregões posteriores a
+  07/04/2026, que ficam fora com `date_range.end = 2026-04-07`.
 
 **Demais arquivos de `data/raw/`** (SHA-256 conferidos em 25/11/2026):
 
@@ -708,6 +719,10 @@ nem erros. A data de download é, portanto, **provavelmente** 21–22/08/2026,
 não comprovada. A janela pedida às fontes foi 2006-04-01 → 2026-04-07.
 
 ### 13.3. REV-03 — Umidade do solo
+
+> Atualizado em 26/11/2026 (§14.3): com a regra de disponibilidade, a
+> umidade do solo começa na linha de abr/2015 (108 linhas vazias), e o
+> walk-forward usa 48 colunas em 85 origens.
 
 - **Disponibilidade original:** o SPL3SMP_E v6 começa em 31/03/2015 (NSIDC).
   O arquivo tem 1.413 registros diários, de 31/03/2015 a 06/04/2026, todos da
@@ -786,3 +801,254 @@ abaixo de RF e XGBoost no holdout, e nenhuma diferença do holdout é
 estatisticamente significativa (§11). A divergência não altera as
 conclusões, mas a reprodutibilidade numérica de RF e XGBoost **entre
 ambientes** continua como limitação.
+
+---
+## 14. Correções de 26/11/2026 — REV-01 a REV-10 (resposta do orientador)
+
+Esta seção responde às considerações do orientador de 26/11/2026 sobre a §13.
+**Nenhum experimento de aprendizado de máquina foi reexecutado.** Foram
+alterados o código de construção da base, os testes e a documentação. A base
+foi reconstruída (`scripts/build_dataset.py`) e os 47 testes passam. Os
+resultados das §9 a §12 **ainda se referem à base anterior** e serão
+substituídos só na rodada definitiva, depois da conferência do commit pelo
+orientador.
+
+### 14.1. REV-01 — Disponibilidade temporal (corrigido no código)
+
+**Regra adotada:** a origem da previsão do mês t+1 continua sendo o **1º dia
+de t+1**. A linha do mês t passa a conter só o que foi **publicado até o
+último dia de t**. A regra é conservadora: nada publicado no próprio dia da
+origem entra. Cada observação bruta recebe uma data de disponibilidade e é
+agregada no mês dessa data, não no mês em que foi medida:
+
+    disponível_em = data_do_registro + (período_dias − 1) + latência_dias
+
+Implementação: `src/tgsi_pipeline/availability.py`, aplicada em
+`_build_monthly_features` (`pipeline.py`) antes de qualquer agregação. Para
+fontes com atraso, a janela de informação de t fica deslocada para trás pela
+latência, mas mantém a duração de um mês, o que deixa as somas de
+precipitação comparáveis entre meses.
+
+| Fonte | Período de referência | Latência adotada | Justificativa |
+|---|---|---|---|
+| CEPEA (preço corrente) | pregão | 0 | divulgação diária; o preço de t é a média dos pregões de t, todos anteriores à origem |
+| BCB PTAX | dia útil | 0 | divulgada no próprio dia |
+| EIA Brent (RBRTE) | dia | **10 dias** | a tabela é atualizada em lote semanal, e a cotação de uma segunda-feira pode sair só na quarta-feira da semana seguinte (9 dias) |
+| NASA POWER | dia | **3 dias** | GEOS-IT "generally ready within about two days" |
+| SMAP SPL3SMP_E | dia | **3 dias** | latência média de ~1 dia e 5 h (NSIDC) |
+| MODIS MOD13Q1 (NDVI) | **composição de 16 dias**, data = início | **16 dias após o fim da composição** | não há valor oficial de latência para o MOD13Q1.061. O suporte do LP DAAC informa, em fórum, ~2 a 3 dias após o fim da composição, e há relato de atraso maior que 5 dias. Adotou-se uma composição inteira de folga |
+| Brent mensal do Banco Mundial (fallback, não usado nesta base) | mês | 1 mês | publicado no início do mês seguinte |
+
+**Efeito no NDVI:** a composição iniciada em 22/03 cobre até 06/04 e fica
+disponível em 22/04. Antes, ela entrava em março, ou seja, na previsão de
+abril, que é o próprio mês-alvo. Agora entra em abril, na previsão de maio.
+Com a nova regra, o NDVI de t é a média das composições **terminadas** até
+16 dias antes do fim de t, o que equivale a uma defasagem de cerca de um mês.
+Todas as variáveis derivadas (defasagens, média móvel e anomalia) foram
+recalculadas a partir da série corrigida.
+
+**Primeiro mês da série:** para as fontes diárias com latência, a janela de
+abr/2006 começaria antes do início da extração (01/04/2006). Esse mês fica
+sem valor, em vez de receber uma soma parcial: clima e Brent ficam ausentes
+em abr/2006.
+
+**Testes automatizados** (`tests/test_availability.py`, 11 testes):
+- regra do NDVI: fim da composição + latência;
+- nenhuma observação agregada em t está disponível na origem ou depois, para
+  clima, Brent, SMAP e NDVI;
+- deslocamento exato da janela;
+- a composição que atravessa a virada de março para abril não entra em março;
+- mês inicial incompleto sem valor;
+- correção do REV-02, descrita abaixo.
+
+**Efeito na base** (`docs/verification_evidence/rev01/`):
+- 239 linhas e 60 colunas, como antes;
+- SHA-256 `a686e62b07f1a507ee4fa3b53c1057c940e965c8838c941ccc855d6c27c0df2a`;
+  a base anterior era `596fba0f…3c43e9b`;
+- câmbio, preços e calendário não mudam;
+- mudam todas as colunas de Brent, clima, NDVI e umidade do solo. Por coluna
+  e com totais de ausentes: `comparacao_colunas_antes_depois.csv`.
+
+**Revisões históricas (limitação mantida):** os dados de NASA POWER, SMAP,
+MODIS e EIA foram baixados em 2026, depois do período de referência. A base
+usa as **versões consolidadas** disponíveis na data do download, e não as que
+existiam em cada origem. Isso vale principalmente para o NASA POWER, cujo
+trecho GEOS-IT é sobrescrito por MERRA-2, e para o MOD13Q1 coleção 6.1, que é
+um reprocessamento. As latências acima são as **atuais** e foram aplicadas
+retroativamente. Em 2006–2015, alguns produtos tinham outra latência ou nem
+existiam em versão operacional. A avaliação, portanto, mede o desempenho com
+dados consolidados e disponibilidade aproximada, e não uma reconstrução em
+tempo real (*real-time vintage*).
+
+### 14.2. REV-02 — Proveniência e licença; preços ausentes
+
+- **Licença do CEPEA:** registrada em `data/raw/LICENSE-CEPEA.md`, com
+  CC BY-NC 4.0, link da página do CEPEA que a declara, condições e arquivos
+  cobertos, e nas §13.2, `data_sources.md` e `README.md`.
+- **Preço ausente tratado como zero (corrigido):** `cepea.resample_monthly`
+  calcula agora a média só sobre os pregões com valor, com um contador por
+  coluna. Um mês sem nenhum valor válido fica `None`. Recalculada a partir
+  do `.xls`, a série mensal é idêntica à anterior (diferença máxima 0,0 nos
+  242 meses), porque a planilha não tem ausentes. Testes em
+  `tests/test_availability.py::CepeaMonthlyMeanTests`.
+- **Abril/2026:** exclusão mantida (§4).
+
+### 14.3. REV-03 — Variáveis efetivas por origem e período de transição
+
+**Número de variáveis efetivas** (colunas com ao menos um valor no treino da
+origem; as colunas inteiramente vazias são descartadas pelo `SimpleImputer`).
+Tabela por origem: `docs/verification_evidence/rev03/variaveis_efetivas_por_origem.csv`,
+para a base anterior e a corrigida.
+
+| Variáveis efetivas | Meses-alvo (base corrigida) | Origens | Base anterior |
+|---|---|---|---|
+| 48 (sem nenhuma coluna de umidade do solo) | mai/2008 → mai/2015 | 85 | mai/2008 → abr/2015 (84) |
+| 49 (+ valor corrente) | jun/2015 | 1 | mai/2015 |
+| 51 (+ lag 1 e média móvel) | jul/2015 | 1 | jun/2015 |
+| 52 (+ lag 2) | ago/2015 | 1 | jul/2015 |
+| 53 (+ lag 3) | set/2015 → mai/2016 | 9 | ago/2015 → abr/2016 |
+| 54 (+ anomalia) | jun/2016 → mar/2026 | 118 | mai/2016 → mar/2026 (119) |
+
+- No walk-forward de choque (215 origens), as árvores usam **48 a 54**
+  variáveis, e não "as mesmas 54 em todas as análises".
+- No holdout (12 origens) e na ablação (12 e 60 origens), todas as origens
+  usam as 54.
+- **Transição:** a umidade do solo corrente existe a partir da linha de
+  abr/2015, quando a primeira observação, de 31/03/2015, fica disponível em
+  03/04. Em seguida entram o lag 1 e a média móvel (mai/2015), o lag 2
+  (jun/2015), o lag 3 (jul/2015) e a anomalia (abr/2016, que exige um abril
+  anterior). Nesse intervalo, parte das colunas da família tem valor e parte
+  é imputada.
+- **Valores imputados:** para os meses anteriores a abr/2015, a coluna recebe
+  a **mediana do treino** da origem. Esse número é um artifício de
+  preenchimento: **não corresponde a uma observação histórica real** de
+  umidade do solo, que não existe antes do lançamento do SMAP. Isso vale
+  também para os primeiros meses de cada derivada durante a transição.
+
+### 14.4. REV-04 — Divergências numéricas
+
+Sem mudança em relação à §13.4. Ficam pendentes as previsões por origem e o
+ambiente das execuções independentes de outubro, que o orientador recuperará.
+Os resultados **sem abril/2026** (24/11/2026, base `596fba0f…`) são
+**intermediários**. Eles foram preservados em
+`docs/verification_evidence/2026-11-24_provisorio_sem_abril/` e não entram no
+artigo. A mudança de classificação no holdout, em que o XGBoost passa à frente
+com a troca de um único mês, fica para a discussão, depois da rodada
+definitiva.
+
+### 14.5. REV-05 — Seleção do ARIMA
+
+**Conferência do texto proposto pelo orientador com o procedimento:** o texto
+corresponde ao que foi feito, com dois complementos:
+1. a ordem (1,1,0) foi definida no TGSI I. A comparação de especificações
+   anterior a 16/11/2026 media o MAE em mai/2024 → abr/2026, janela que
+   continha os 12 meses-alvo do holdout então vigente (§12);
+2. na série sem abril/2026 (resultado intermediário de 24/11), o (1,1,0) não
+   tem mais o **menor** AIC: (0,1,1) = 1176,87 contra (1,1,0) = 1177,00. Os
+   MAE de validação ficam entre 4,335 e 4,437, todos abaixo da persistência
+   (5,145).
+
+   O ARIMA usa só a série de preço, que não muda com o REV-01, então esses
+   números já valem para a base corrigida. A justificativa "menor AIC" do
+   artigo precisa ser trocada por "diferenças desprezíveis; mantido por
+   parcimônia e comparabilidade". Seguindo a orientação, a configuração não
+   foi alterada.
+
+**Texto incorporado às limitações:**
+> A seleção da configuração do ARIMA foi revisada para separar
+> cronologicamente a etapa de validação da avaliação final. Entretanto,
+> versões anteriores do procedimento experimental utilizaram observações
+> posteriormente destinadas ao conjunto de teste durante a comparação de
+> configurações, e a ordem (1,1,0) foi definida antes dessa separação.
+> Dessa forma, embora o protocolo revisado estabeleça a separação temporal
+> entre seleção e avaliação, o conjunto de teste não pode ser caracterizado
+> como historicamente intocado ao longo de todo o desenvolvimento da
+> pesquisa.
+
+### 14.6. REV-06 — Interpretação da ablação
+
+**Texto incorporado:**
+> Nas condições experimentais avaliadas, a inclusão das variáveis
+> explicativas consideradas não proporcionou uma melhoria consistente em
+> relação aos modelos univariados de referência. Esse resultado está
+> condicionado à base de dados, às variáveis, às configurações dos modelos,
+> ao horizonte de previsão e às janelas temporais adotadas, não permitindo
+> generalizações para outros contextos experimentais.
+
+**Explicitações:**
+- **Janela de validação:** a seleção depende da janela de validação
+  (abr/2019 → mar/2021), que coincide com o início do choque de preços. Com
+  outra janela, o conjunto selecionado poderia ser outro.
+- **Critério heurístico:** o critério `média(ΔMAE) − 2·desvio(ΔMAE) > 0` é
+  uma heurística fixada *a priori*, e não um teste estatístico. Ele não
+  controla erro do tipo I nem a correlação entre famílias.
+- **Ablação sobre as já selecionadas:** as ablações individuais
+  (*leave-one-out*) são feitas **apenas sobre as famílias já selecionadas**.
+  As famílias descartadas na etapa 1 não foram avaliadas individualmente por
+  ablação.
+- **Janelas sobrepostas:** as janelas de 12 e 60 origens **se sobrepõem**,
+  porque as 12 estão contidas nas 60. Os resultados das duas não são
+  evidências independentes.
+
+### 14.7. REV-07 — Interpretação do Diebold-Mariano
+
+**Texto incorporado para o holdout:**
+> Para a janela de avaliação de 12 meses, o teste de Diebold-Mariano não
+> identificou diferenças estatisticamente significativas entre os modelos
+> comparados, considerando o nível de significância adotado. Esse resultado
+> não demonstra equivalência de desempenho, indicando apenas que, nas
+> condições avaliadas e diante do número limitado de observações, não houve
+> evidência estatística suficiente para rejeitar a hipótese nula de
+> igualdade da capacidade preditiva.
+
+**Diferenças entre a amostra longa e o holdout:** a amostra longa tem 215
+previsões depois da exclusão de abril/2026; antes eram 216. Ela difere do
+holdout em quatro pontos:
+1. **hiperparâmetros de RF/XGBoost:** RF com 200 árvores e profundidade 6;
+   XGB com 200 árvores, profundidade 3 e taxa de aprendizado 0,05. No holdout
+   valem as configurações principais da §5;
+2. **variáveis efetivas:** de 48 a 54 por origem (§14.3), contra 54 em todas
+   as origens do holdout;
+3. **treino mínimo:** 24 meses, com origens desde mai/2008, contra treinos de
+   227 a 238 linhas no holdout;
+4. **período:** inclui o choque de 2020–2022.
+
+ARIMA(1,1,0) e persistência são idênticos nas duas amostras.
+
+**Comparações múltiplas:** os seis pares de cada amostra foram avaliados
+também com Bonferroni (α = 0,05/6 ≈ 0,0083), já registrado no artigo. Os
+recortes pré-choque, choque e pós-choque são subdivisões da mesma amostra
+longa e foram lidos com a mesma correção. As duas amostras, holdout e
+longa, não foram corrigidas **entre si**, porque são tratadas como
+experimentos distintos. Isso fica declarado no texto.
+
+### 14.8. REV-08 — Consistência
+
+A conferência final de consistência só pode ser feita **depois** da rodada
+definitiva, porque as tabelas do artigo e das §9 a §12 mudam com o REV-01.
+Já identificado para essa conferência:
+- o artigo ainda descreve **240 pares** e alvos até abr/2026, em vez de 239
+  até mar/2026;
+- o artigo fala em **216 previsões** em vez de 215;
+- o artigo descreve "as mesmas 54 variáveis em todas as análises", em vez de
+  48 a 54 no walk-forward (REV-03);
+- o artigo afirma "menor AIC" para o ARIMA(1,1,0), o que deixa de valer
+  (REV-05);
+- a terceira limitação do artigo ("sem modelar a data efetiva de
+  publicação") deixa de valer e será substituída pela regra da §14.1 e pela
+  limitação das versões consolidadas.
+
+Cada tabela da versão final levará o rótulo da base (SHA-256) e do commit da
+execução. Os resultados de bases diferentes não serão misturados.
+
+### 14.9. REV-09 — Versão
+
+Ainda não há versão definitiva. O commit com estas correções será
+encaminhado ao orientador para conferência **antes** da rodada definitiva de
+experimentos. A tag `tgsi-ii-final` só será criada depois da aprovação.
+
+### 14.10. REV-10 — Evidências
+
+Organizadas em `docs/verification_evidence/`; o inventário está no
+[`README.md`](verification_evidence/README.md) da pasta, com o que existe e
+o que não está mais disponível.

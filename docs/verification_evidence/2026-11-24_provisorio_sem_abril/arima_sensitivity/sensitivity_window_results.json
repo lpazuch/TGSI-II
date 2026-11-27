@@ -1,0 +1,102 @@
+[
+  {
+    "window_months": 36,
+    "train_start": "2021-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.608744,
+    "rmse": 13.441687,
+    "mape": 9.161184
+  },
+  {
+    "window_months": 48,
+    "train_start": "2020-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.644553,
+    "rmse": 13.475717,
+    "mape": 9.187508
+  },
+  {
+    "window_months": 60,
+    "train_start": "2019-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.550228,
+    "rmse": 13.386088,
+    "mape": 9.118169
+  },
+  {
+    "window_months": 72,
+    "train_start": "2018-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.547966,
+    "rmse": 13.383939,
+    "mape": 9.116506
+  },
+  {
+    "window_months": 84,
+    "train_start": "2017-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.531513,
+    "rmse": 13.368309,
+    "mape": 9.104412
+  },
+  {
+    "window_months": 96,
+    "train_start": "2016-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.497433,
+    "rmse": 13.335935,
+    "mape": 9.07936
+  },
+  {
+    "window_months": 120,
+    "train_start": "2014-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.458866,
+    "rmse": 13.299305,
+    "mape": 9.051011
+  },
+  {
+    "window_months": 144,
+    "train_start": "2012-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.360001,
+    "rmse": 13.205432,
+    "mape": 8.97834
+  },
+  {
+    "window_months": 180,
+    "train_start": "2009-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.304675,
+    "rmse": 13.152918,
+    "mape": 8.937674
+  },
+  {
+    "window_months": 216,
+    "train_start": "2006-04-01",
+    "train_end": "2024-03-01",
+    "test_start": "2024-04-01",
+    "test_end": "2026-03-01",
+    "mae": 12.35951,
+    "rmse": 13.204966,
+    "mape": 8.977979
+  }
+]

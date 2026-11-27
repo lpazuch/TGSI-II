@@ -27,9 +27,12 @@ precisa ser confirmado antes da escrita final do TCC.
 > - **Conteúdo conferido (25/11/2026):** aba "Plan 1", cabeçalho "INDICADOR DA
 >   SOJA CEPEA/ESALQ - PARANAGUÁ" / "Fonte: Cepea", colunas `Data`,
 >   `À vista R$`, `À vista US$`; 5.003 pregões de 13/03/2006 a 07/04/2026.
-> - **Redistribuição:** termos de uso do CEPEA **não verificados**. Se houver
->   restrição, o `.xls` deve sair do repositório público e ser obtido pela
->   consulta pública (ver `methodology.md` §13.2).
+> - **Licença:** dados do CEPEA sob **CC BY-NC 4.0** (Creative Commons
+>   Atribuição-NãoComercial 4.0 Internacional), conforme
+>   `cepea.org.br/br/licenca-de-uso-de-dados.aspx` (consulta em 26/11/2026). A redistribuição é
+>   permitida com atribuição, indicação da licença e das modificações, e só para
+>   uso não comercial. Detalhes e arquivos cobertos:
+>   [`data/raw/LICENSE-CEPEA.md`](../data/raw/LICENSE-CEPEA.md).
 >
 > Os demais arquivos de `data/raw/` (câmbio, Brent, clima, NDVI, umidade do
 > solo, alvo diário/mensal) foram gerados pelo próprio pipeline
@@ -81,7 +84,7 @@ precisa ser confirmado antes da escrita final do TCC.
 | Frequência original | Diária (EIA) ou mensal (fallback World Bank) |
 | Período | 2006-04-01 → 2026-04-07 |
 | Transformação | Scraping de tabela HTML → série diária (`economics_brent_daily.csv`) |
-| Agregação | **Média mensal** |
+| Agregação | **Média mensal** dos dias disponíveis até o fim do mês: cada cotação é atribuída à data + 10 dias (atualização semanal da EIA; `methodology.md` §14.1) |
 | Fonte usada nesta run | **100% EIA** (5060/5060 linhas com `oil_source=EIA`; fallback World Bank não foi acionado) — verificado em `data/raw/economics_brent_daily.csv` |
 
 ## 4. Clima (precipitação, temperatura, umidade, vento)
@@ -93,7 +96,7 @@ precisa ser confirmado antes da escrita final do TCC.
 | Variáveis / unidade | `precipitation_mm` (mm) · `temperature_mean_c` / `_max_c` / `_min_c` (°C) · `relative_humidity_pct` (%) · `wind_speed_ms` (m/s). `climate_source` registra `INMET` / `NASA_POWER` / `INMET+NASA_POWER` por dia |
 | Frequência original | INMET: horária → agregada a diária (precip. = soma; temp. média/umidade/vento = média; máx/mín = máx/mín). NASA POWER: diária |
 | Período | 2006-04-01 → 2026-04-07 |
-| Agregação mensal | Precipitação = **soma**; temperatura média, umidade, vento = **média**; temp. máx = **máx**; temp. mín = **mín** (`_build_monthly_features`) |
+| Agregação mensal | Precipitação = **soma**; temperatura média, umidade, vento = **média**; temp. máx = **máx**; temp. mín = **mín** (`_build_monthly_features`), sobre os dias **disponíveis** no mês: cada dia é atribuído à data + 3 dias (latência do NASA POWER; `methodology.md` §14.1) |
 | Fonte usada nesta run | **100% NASA_POWER** (7312/7312 dias com `climate_source=NASA_POWER`, verificado em `data/raw/climate_combined_sorriso_mt.csv`). Não existe `climate_inmet_*.csv` em `data/raw/` — a estação INMET **A904** não retornou nenhuma linha usável na janela 2006-04→2026-04 (fetch falhou ou a estação não tem dados históricos publicados nesse período; o pipeline só grava esse arquivo `if inmet_rows:`) |
 | *(a verificar)* | Causa exata da ausência de dados INMET/A904 (estação sem histórico publicado vs. falha pontual de rede/parsing no dia da coleta) |
 
@@ -106,7 +109,7 @@ precisa ser confirmado antes da escrita final do TCC.
 | Variável / unidade | `ndvi` — adimensional, −1 a 1 (fator de escala aplicado se o CSV vier em inteiros) |
 | Frequência original | Composição de 16 dias. A data de cada registro é o **início** da composição (todas as 461 datas caem nos dias 1 + 16k do ano) |
 | Período | MODIS desde 2000; nesta run, alinhado à janela até 2026-04 |
-| Agregação | Valor do ponto → **média mensal** das composições cuja data de início cai no mês. **Problema (REV-01):** 225 das 461 composições terminam no mês seguinte, então o NDVI de t inclui dias de t+1 (`methodology.md` §13.1) |
+| Agregação | Valor do ponto → **média mensal** das composições **disponíveis** no mês: a data do arquivo é o início da composição; cada uma é atribuída a início + 15 dias (fim) + 16 dias de latência conservadora (`availability.py`, `methodology.md` §14.1). Até 25/11/2026 a atribuição era pela data de início, e 225 das 461 composições terminavam no mês seguinte (§13.1) |
 | Layer usada nesta run | **`_250m_16_days_NDVI`** do produto `MOD13Q1.061` (461/461 linhas com `ndvi_source=AppEEARS:MOD13Q1.061:_250m_16_days_NDVI`, verificado em `data/raw/remote_ndvi_sorriso_mt.csv`) |
 
 ## 6. Umidade do solo
@@ -117,8 +120,8 @@ precisa ser confirmado antes da escrita final do TCC.
 | Referência | `appeears.earthdatacloud.nasa.gov/api` — layers `soil_moisture_am` / `soil_moisture_pm` (média das disponíveis) |
 | Variável / unidade | `soil_moisture_m3m3` — m³/m³ |
 | Frequência original | Diária, mas só a passagem PM foi usada; por causa da órbita, há em média ~11 dias com dado por mês |
-| Período | Produto a partir de **31/03/2015**; arquivo de 31/03/2015 a 06/04/2026, sem ausentes. No dataset final há valores a partir de **mar/2015**, então as **107** primeiras linhas (abr/2006 a fev/2015) ficam sem umidade do solo. Tratamento nos experimentos: `methodology.md` §13.3 |
-| Agregação | **Média mensal** |
+| Período | Produto a partir de **31/03/2015**; arquivo de 31/03/2015 a 06/04/2026, sem ausentes. Com a latência de 3 dias (`methodology.md` §14.1), o dataset final tem valores a partir de **abr/2015**, e as **108** primeiras linhas (abr/2006 a mar/2015) ficam sem umidade do solo. Tratamento nos experimentos: `methodology.md` §13.3 |
+| Agregação | **Média mensal** dos dias disponíveis no mês (data + 3 dias; `methodology.md` §14.1) |
 | Layer usada nesta run | **`Soil_Moisture_Retrieval_Data_PM_soil_moisture_pm`** do produto `SPL3SMP_E.006` (1413/1413 linhas com `soil_moisture_source=AppEEARS:SPL3SMP_E.006:Soil_Moisture_Retrieval_Data_PM_soil_moisture_pm`, verificado em `data/raw/remote_soil_moisture_sorriso_mt.csv`) — só a passagem **PM**; a passagem AM não foi retornada/selecionada nesta coleta |
 
 ## 7. Variáveis derivadas do calendário / da própria série
